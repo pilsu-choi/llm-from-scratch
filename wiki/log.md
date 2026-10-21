@@ -45,7 +45,8 @@ title: 작업 로그
 - 6단계 줄별 세기 (`tasks.py` `chain`/`parse_chain`/`row_counts`/`sum_question`, `vision.py` `--rows`/`--drill`/`--text`/`--max_new`, `evaluate`의 chain 통계, `sft.skills`). 답 "3+2=5+4=9+1=10", 텍스트 덧셈 연습 25%.
   `vlm_rows`(LM 풀기, 4000스텝 2809초): 처음 보는 7·8개 1.00, 9개 0.71, 10개 0.36. 대조군 `vlm_rows_ctrl`(숫자 하나 답): 7개 이상 0 → 조합이 벽을 넘김. 4인 줄 정확도 0.87(학습 장면에서 꽉 찬 줄 0.19%).
   망각: 덧셈 4/8/12/16자리 1.0 → 0, 이야기 단어 0.523 → 0.023. `vlm_rows_replay`(SFT 텍스트 배치 16 손실 합산): 덧셈 1.0/0.995/0.995/0.94, 이야기 0.640 보존, 대신 8개 0.52, 9개 0.12.
-  `vrsi_rows`(any 필터, 문제 20,000): frontier 9 → 15, 라운드 3에서 11개(pass@1 0.14) 학습 후 12–16개 동시 해결, 라운드 6–7 1–16개 모두 1.00, 전체 0.769.
+  `vrsi_rows`(any 필터, 문제 20,000): frontier 9 → 16(상한), 라운드 3에서 11개(pass@1 0.14) 학습 후 12–16개 동시 해결, 라운드 6부터 1–16개 모두 1.00, 전체 0.769.
 - 7단계 한국어: `Tokenizer.extend`(+ `--extend` CLI, `train`이 `extend`를 사용), `data.batches` 쉼표 shard 섞기(1개면 기존 난수열 유지), `train` shard별 val·여러 프롬프트, `get_data.sh ko`. 테스트 추가(확장 id 보존, shard 균등 섞기).
   데이터 g0ster/TinyStories-Korean (MIT, 기계 번역) → [결정](decisions/2026-10-21-korean-data.md). tok_ko = tok_chat + 병합 8192 (vocab 16386): 한국어 1.01 → 6.53 bytes/token, 영어 인코딩 동일.
   `ko_ext` vs `ko_byte`(바이트 대조군), runs/small에서 5000스텝, 한국어:영어 1:1, lr 5e-4: 한국어 0.497 대 0.714 bits/byte (학습 전 2.24 / 14.1), 영어 val 1.1638 → 1.2061 / 1.1895.
+  한국어 샘플 100개씩(400바이트): 깨진 글자 0/0, distinct-2 ext 0.662 / byte 0.819 / 실제 0.793, 같은 어절 3연속 1/0.
