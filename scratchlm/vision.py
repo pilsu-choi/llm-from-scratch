@@ -21,9 +21,11 @@ import numpy as np
 import torch
 from torch import nn
 
+from .data import batches
 from .model import GPT, Block, Config, Linear, RMSNorm, load_checkpoint, rope_tables, silu
 from .optim import AdamW, clip_grad_norm, cosine_lr
-from .tasks import ASSISTANT, EOT, GRID, IMAGE, IMG, USER, chat_tokenizer, encode_chat, question, render, scene
+from .sft import skills
+from .tasks import ASSISTANT, EOT, GRID, IMAGE, IMG, USER, chat_tokenizer, encode_chat, parse_chain, question, render, row_counts, scene, sum_question
 from .tokenizer import Tokenizer
 
 PATCH = 8
@@ -77,12 +79,19 @@ def to_tensor(imgs, dev):
     return torch.from_numpy(np.stack(imgs)).to(dev).float() / 255 - 0.5
 
 
-def examples(rng, n, counts):
-    """n random (objects, image, question, answer) with a number of objects drawn from `counts`."""
+def examples(rng, n, counts, rows=False, drill=0.0, count_only=False):
+    """n random (objects, image, question, answer) with a number of objects drawn from `counts`.
+    A `drill` share are text-only sums on a blank image (no objects); count_only asks only "How many shapes"."""
     out = []
     for _ in range(n):
+        if rng.random() < drill:
+            out.append(([], render([], rng), *sum_question(rng)))
+            continue
         objs = scene(rng, int(rng.choice(counts)))
-        out.append((objs, render(objs, rng), *question(rng, objs)))
+        q, a = question(rng, objs, rows)
+        while count_only and kind(q) != "count_all":
+            q, a = question(rng, objs, rows)
+        out.append((objs, render(objs, rng), q, a))
     return out
 
 
@@ -99,8 +108,9 @@ def make_batch(tok, exs, L, dev):
     return w[:, :-1], to_tensor([e[1] for e in exs], dev), torch.where(m[:, 1:] == 1, w[:, 1:], -1)
 
 
-def fit(vlm, tok, next_examples, steps, lr, warmup, L, dev, every=None):
-    """Train the parameters that require grad (fresh AdamW, warmup + cosine). Calls every(step) each 100 steps."""
+def fit(vlm, tok, next_examples, steps, lr, warmup, L, dev, every=None, text=None):
+    """Train the parameters that require grad (fresh AdamW, warmup + cosine). Calls every(step) each 100 steps.
+    `text`: optional endless (x, y) text batches whose LM loss is added each step (replay against forgetting)."""
     params = [p for p in vlm.parameters() if p.requires_grad]
     opt = AdamW(params)
     vlm.train()
@@ -108,6 +118,8 @@ def fit(vlm, tok, next_examples, steps, lr, warmup, L, dev, every=None):
         x, imgs, y = make_batch(tok, next_examples(), L, dev)
         with torch.autocast("cuda", dtype=torch.bfloat16):
             _, loss = vlm(x, imgs, y)
+            if text:
+                loss = loss + vlm.lm(*next(text))[1]
         loss.backward()
         clip_grad_norm(params, 1.0)
         opt.step(cosine_lr(step, lr, warmup, steps))
@@ -117,7 +129,7 @@ def fit(vlm, tok, next_examples, steps, lr, warmup, L, dev, every=None):
     vlm.eval()
 
 
-def answer(vlm, tok, imgs, questions, dev, temperature=0.0, chunk=2048):
+def answer(vlm, tok, imgs, questions, dev, temperature=0.0, max_new=3, chunk=2048):
     """Replies (greedy by default), batched by prompt token length (the KV-cache generate needs equal-length rows),
     at most `chunk` rows per batch."""
     prompts = [tok.encode(USER + IMAGE * N_PATCHES + q + ASSISTANT) for q in questions]
@@ -125,27 +137,28 @@ def answer(vlm, tok, imgs, questions, dev, temperature=0.0, chunk=2048):
     for n in sorted({len(p) for p in prompts}):
         same = [i for i, p in enumerate(prompts) if len(p) == n]
         for idx in (same[j : j + chunk] for j in range(0, len(same), chunk)):
-            g = vlm.generate(torch.tensor([prompts[i] for i in idx], device=dev), to_tensor([imgs[i] for i in idx], dev), 3, temperature)
+            g = vlm.generate(torch.tensor([prompts[i] for i in idx], device=dev), to_tensor([imgs[i] for i in idx], dev), max_new, temperature)
             for i, row in zip(idx, g[:, n:].tolist()):
                 out[i] = tok.decode(row[: row.index(eot)] if eot in row else row)
     return out
 
 
 def kind(q):
-    return ("count_all" if q == "How many shapes are there?" else "count_color" if q.endswith("shapes are there?")
+    return ("count_all" if q == "How many shapes are there?" else "sum" if q.startswith("What is") else "count_color" if q.endswith("shapes are there?")
             else "count_shape" if q.startswith("How many") else "exists" if q.startswith("Is") else "color_of")
 
 
 @torch.no_grad()
-def evaluate(vlm, tok, counts, n=1000, seed=123, dev="cuda"):
-    """Greedy accuracy per question type, per number of objects (all types), and of "How many shapes" per number of objects."""
+def evaluate(vlm, tok, counts, n=1000, seed=123, dev="cuda", rows=False, max_new=3):
+    """Greedy accuracy per question type, per number of objects (all types), and of "How many shapes" per number of objects.
+    With rows=True the "How many shapes" replies are also split into where they go wrong (`chain_errors`)."""
     rng = np.random.default_rng(seed)
     data = []
     for i in range(n):
         objs = scene(rng, counts[i % len(counts)])
-        data.append((objs, *question(rng, objs), render(objs, rng)))
+        data.append((objs, *question(rng, objs, rows), render(objs, rng)))
     with torch.autocast("cuda", dtype=torch.bfloat16):
-        replies = answer(vlm, tok, [d[3] for d in data], [d[1] for d in data], dev)
+        replies = answer(vlm, tok, [d[3] for d in data], [d[1] for d in data], dev, max_new=max_new)
     by_kind, by_count, count_all = {}, {}, {}
     for (objs, q, a, _), r in zip(data, replies):
         by_kind.setdefault(kind(q), []).append(r == a)
@@ -153,8 +166,29 @@ def evaluate(vlm, tok, counts, n=1000, seed=123, dev="cuda"):
         if kind(q) == "count_all":
             count_all.setdefault(len(objs), []).append(r == a)
     mean = lambda d: {k: round(float(np.mean(v)), 3) for k, v in sorted(d.items())}
-    return {"by_kind": mean(by_kind), "by_objects": mean(by_count), "count_all": mean(count_all),
-            "overall": round(float(np.mean([r == d[2] for d, r in zip(data, replies)])), 3)}
+    res = {"by_kind": mean(by_kind), "by_objects": mean(by_count), "count_all": mean(count_all),
+           "overall": round(float(np.mean([r == d[2] for d, r in zip(data, replies)])), 3)}
+    if rows:
+        res["chain"] = chain_errors([(d[0], r) for d, r in zip(data, replies) if kind(d[1]) == "count_all"])
+    return res
+
+
+def chain_errors(pairs):
+    """For (objects, row-by-row reply) pairs: is the reply well formed, are its row counts right (per true row count),
+    is its arithmetic right given its own row counts, and is its final total right (per number of objects)."""
+    form, arith, total, row_ok = {}, {}, {}, {}
+    for objs, r in pairs:
+        n, p = len(objs), parse_chain(r)
+        form.setdefault(n, []).append(p is not None and len(p[0]) == GRID)
+        if p is None or len(p[0]) != GRID:
+            continue
+        rows, sums = p
+        arith.setdefault(n, []).append(sums == list(np.cumsum(rows)[1:]))
+        total.setdefault(n, []).append(sums[-1] == n)
+        for got, true in zip(rows, row_counts(objs)):
+            row_ok.setdefault(true, []).append(got == true)
+    mean = lambda d: {k: round(float(np.mean(v)), 3) for k, v in sorted(d.items())}
+    return {"well_formed": mean(form), "arith_ok": mean(arith), "total_ok": mean(total), "row_ok_by_true_count": mean(row_ok)}
 
 
 def save_png(path, img):
@@ -181,6 +215,13 @@ class VisionConfig:
     L: int = 96  # tokens per example (64 image + question + answer, padded)
     vit_layers: int = 4
     vit_dim: int = 256
+    vlm: str = ""  # start from a trained VLM checkpoint instead of a fresh ViT + projector
+    rows: bool = False  # answer "How many shapes" row by row with a running sum (tasks.chain)
+    drill: float = 0.0  # share of text-only sums (tasks.sum_question) in each batch
+    max_new: int = 3  # reply tokens at eval; a row-by-row answer needs up to 16
+    eval_max: int = 10  # eval scenes have 1..eval_max objects
+    text: str = ""  # token shard replayed alongside (e.g. data/sft_train.bin) so an unfrozen LM keeps its text skills
+    text_batch: int = 16  # x ctx_len tokens per step
     seed: int = 0
 
 
@@ -194,6 +235,10 @@ def build(vc, dev, vlm_ckpt=None):
     if vc.freeze_lm:
         vlm.lm.requires_grad_(False)
     return tok, vlm
+
+
+def text_batches(c, dev):
+    return batches(c.text, c.text_batch, Config.ctx_len, dev, c.seed) if c.text else None
 
 
 def logger(path):
@@ -212,7 +257,7 @@ def main(vc):
     run = os.path.join("runs", vc.name)
     os.makedirs(run, exist_ok=True)
     torch.manual_seed(vc.seed)
-    tok, vlm = build(vc, dev)
+    tok, vlm = build(vc, dev, vc.vlm)
     emit = logger(os.path.join(run, "log.jsonl"))
     emit(event="start", trainable=sum(p.numel() for p in vlm.parameters() if p.requires_grad),
          vit=sum(p.numel() for p in vlm.vit.parameters()), config=dataclasses.asdict(vc))
@@ -223,11 +268,16 @@ def main(vc):
         emit(step=step, loss=round(loss, 4), secs=round(time.time() - t0))
         if step % 1000 == 0 or step == vc.steps:
             vlm.eval()
-            emit(step=step, eval=evaluate(vlm, tok, list(range(1, 11))))
+            emit(step=step, eval=evaluate(vlm, tok, list(range(1, vc.eval_max + 1)), rows=vc.rows, max_new=vc.max_new))
             vlm.train()
 
     counts = list(range(vc.min_count, vc.max_count + 1))
-    fit(vlm, tok, lambda: examples(rng, vc.batch, counts), vc.steps, vc.lr, vc.warmup, vc.L, dev, every)
+    if not vc.freeze_lm:  # the LM learns too, so watch its text skills (stage A leaves them untouched)
+        emit(step=0, skills=skills(vlm.lm, tok, digits=(4, 8, 12, 16)))
+    fit(vlm, tok, lambda: examples(rng, vc.batch, counts, vc.rows, vc.drill), vc.steps, vc.lr, vc.warmup, vc.L, dev, every,
+        text_batches(vc, dev))
+    if not vc.freeze_lm:
+        emit(step=vc.steps, skills=skills(vlm.lm, tok, digits=(4, 8, 12, 16)))
     torch.save({"vlm": vlm.state_dict(), "config": dataclasses.asdict(vc)}, os.path.join(run, "ckpt.pt"))
     emit(event="done", secs=round(time.time() - t0))
 
@@ -265,6 +315,12 @@ class ImageRSIConfig:
     lr: float = 3e-4
     L: int = 96
     filter: str = "majority"  # or "any" / "oracle", see above
+    rows: bool = False  # row-by-row answers (long, so lucky hits vanish and "any" is safe)
+    drill: float = 0.0  # share of text-only sums in the replay half (sampled and verified like the rest)
+    count_only: bool = False  # frontier problems ask only "How many shapes" (the question promotion reads)
+    max_new: int = 3
+    text: str = ""  # see VisionConfig
+    text_batch: int = 16
     eval_n: int = 4000  # 250 scenes per object count, ~60 of them "How many shapes"
     seed: int = 1  # eval uses 123
 
@@ -275,11 +331,11 @@ def majority(replies, truth):
     return votes[truth] > max([v for a, v in votes.items() if a != truth], default=0)
 
 
-def sample_and_filter(vlm, tok, exs, frontier, k, temperature, filter):
+def sample_and_filter(vlm, tok, exs, frontier, k, temperature, filter, max_new):
     """Keep problems by `filter`. Stats split by frontier/replay; "kept" counts majority-correct problems,
     "passk" any-correct ones, "lucky" those where exactly one of k samples was right."""
     with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
-        outs = answer(vlm, tok, [e[1] for e in exs] * k, [e[2] for e in exs] * k, "cuda", temperature)
+        outs = answer(vlm, tok, [e[1] for e in exs] * k, [e[2] for e in exs] * k, "cuda", temperature, max_new)
     n = len(exs)
     stats = {s: collections.Counter() for s in ("frontier", "replay")}
     kept = []
@@ -288,8 +344,8 @@ def sample_and_filter(vlm, tok, exs, frontier, k, temperature, filter):
         right, ok = replies.count(e[3]), majority(replies, e[3])
         st = stats["frontier" if len(e[0]) == frontier else "replay"]
         st.update(n=1, pass1=replies[0] == e[3], passk=right > 0, lucky=right == 1, kept=ok)
-        if kind(e[2]) == "count_all":
-            st.update(count_all=1, count_all_kept=ok)
+        if kind(e[2]) in ("count_all", "sum"):
+            st.update(**{kind(e[2]): 1, kind(e[2]) + "_kept": ok, kind(e[2]) + "_any": right > 0})
         if {"majority": ok, "any": right > 0, "oracle": True}[filter]:
             kept.append(e)
     return kept, {s: {key: (round(v / st["n"], 4) if key in ("pass1", "passk", "lucky") else v) for key, v in st.items()}
@@ -304,23 +360,30 @@ def self_improve(rc):
     torch.manual_seed(rc.seed)
     tok, vlm = build(rc, dev, rc.vlm)
     counts = list(range(1, rc.max_count + 1))
-    acc = evaluate(vlm, tok, counts, n=rc.eval_n)
+    acc = evaluate(vlm, tok, counts, n=rc.eval_n, rows=rc.rows, max_new=rc.max_new)
     frontier = next((c for c in range(rc.trained_max + 1, rc.max_count + 1) if acc["count_all"][c] < rc.promote), rc.max_count)
     emit(round=0, frontier=frontier, eval=acc, config=dataclasses.asdict(rc))
+    if not rc.freeze_lm:
+        emit(round=0, skills=skills(vlm.lm, tok, digits=(4, 8, 12, 16)))
     rng = np.random.default_rng(rc.seed)
+    text = text_batches(rc, dev)
     for r in range(1, rc.rounds + 1):
         t0 = time.time()
-        exs = examples(rng, rc.problems // 2, [frontier]) + examples(rng, rc.problems // 2, list(range(1, frontier)))
-        kept, stats = sample_and_filter(vlm, tok, exs, frontier, rc.k, rc.temperature, rc.filter)
+        exs = (examples(rng, rc.problems // 2, [frontier], rc.rows, count_only=rc.count_only)
+               + examples(rng, rc.problems // 2, list(range(1, frontier)), rc.rows, rc.drill))
+        kept, stats = sample_and_filter(vlm, tok, exs, frontier, rc.k, rc.temperature, rc.filter, rc.max_new)
         if stats["frontier"]["kept"] < rc.min_kept and rc.filter == "majority":
             emit(round=r, stop="too few verified frontier answers", sampling=stats)
             break
-        fit(vlm, tok, lambda: [kept[i] for i in rng.integers(len(kept), size=rc.batch)], rc.steps, rc.lr, 20, rc.L, dev)
-        acc = evaluate(vlm, tok, counts, n=rc.eval_n)
+        fit(vlm, tok, lambda: [kept[i] for i in rng.integers(len(kept), size=rc.batch)], rc.steps, rc.lr, 20, rc.L, dev,
+            text=text)
+        acc = evaluate(vlm, tok, counts, n=rc.eval_n, rows=rc.rows, max_new=rc.max_new)
         emit(round=r, frontier=frontier, kept=len(kept), sampling=stats, eval=acc, secs=round(time.time() - t0))
         torch.save({"vlm": vlm.state_dict(), "config": dataclasses.asdict(rc)}, os.path.join(run, "ckpt.pt"))
         if acc["count_all"][frontier] >= rc.promote:
             frontier = min(frontier + 1, rc.max_count)
+    if not rc.freeze_lm:
+        emit(round=r, skills=skills(vlm.lm, tok, digits=(4, 8, 12, 16)))
 
 
 if __name__ == "__main__":

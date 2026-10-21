@@ -45,8 +45,16 @@ class Tokenizer:
 
     @classmethod
     def train(cls, texts, vocab_size, specials=(), verbose=False):
+        grown = cls().extend(texts, vocab_size - 256 - len(specials), verbose)
+        n = 256 + len(grown.merges)
+        return cls(grown.merges, {s: n + k for k, s in enumerate(specials)})
+
+    def extend(self, texts, n_new, verbose=False):
+        """Learn up to n_new more merges on `texts`, on top of the existing ones (vocab extension).
+        Words start as the current encoding, and new ids follow the current vocab, so every existing id keeps
+        its meaning and a trained model only needs new embedding rows (model.load_checkpoint)."""
         counts = Counter(c for t in texts for c in PAT.findall(t))
-        words = [list(w.encode()) for w in counts]
+        words = [list(self._encode_chunk(w)) for w in counts]
         freqs = list(counts.values())
         stats, where = Counter(), defaultdict(set)  # pair -> weighted count / word indices
         for i, w in enumerate(words):
@@ -54,8 +62,9 @@ class Tokenizer:
                 stats[p] += freqs[i]
                 where[p].add(i)
 
-        merges, vocab = {}, {i: bytes([i]) for i in range(256)}
-        for new in range(256, vocab_size - len(specials)):
+        merges, vocab = dict(self.merges), dict(self.vocab)
+        start = self.vocab_size
+        for new in range(start, start + n_new):
             if not stats:
                 break
             pair = max(stats, key=stats.get)
@@ -73,8 +82,7 @@ class Tokenizer:
                     where[p].add(i)
             if verbose and new % 500 == 0:
                 print(f"merge {new}: {pair} -> {vocab[new]!r}", file=sys.stderr)
-        n = 256 + len(merges)
-        return cls(merges, {s: n + k for k, s in enumerate(specials)})
+        return Tokenizer(merges, dict(self.specials))
 
     def _encode_chunk(self, chunk):
         if chunk in self._cache:
@@ -122,12 +130,13 @@ if __name__ == "__main__":
     ap.add_argument("--vocab", type=int, default=8192)
     ap.add_argument("--max-mb", type=float, default=50, help="train on the first N MB of the input")
     ap.add_argument("--specials", default="<|endoftext|>")
+    ap.add_argument("--extend", help="grow this tokenizer (keeps its ids) instead of training from scratch; --vocab = merges to add")
     a = ap.parse_args()
     with open(a.input, encoding="utf-8") as f:
         text = f.read(int(a.max_mb * 2**20))
     specials = a.specials.split(",")
     docs = re.split("|".join(map(re.escape, specials)), text)  # never learn merges across specials
-    tok = Tokenizer.train(docs, a.vocab, specials, verbose=True)
+    tok = Tokenizer.load(a.extend).extend(docs, a.vocab, True) if a.extend else Tokenizer.train(docs, a.vocab, specials, verbose=True)
     tok.save(a.out)
     sample = docs[1][:300]
     ids = tok.encode(sample)

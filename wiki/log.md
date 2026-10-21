@@ -42,3 +42,10 @@ title: 작업 로그
   `runs/vlm`: LM 고정, 학습 파라미터 3,655,936(ViT 3,262,720), 4000스텝 1027초. 손실 0.678 → 0.222. 전체 **0.577**, 색 개수 0.774, 모양 개수 0.333, 도형 1개 0.97, 6개 0.64, 처음 보는 7–10개 0.39 → 0.19.
 - 이미지 RSI (`vision.py` `self_improve`, `fit`/`examples` 분리, `answer`에 온도·청크, `evaluate`에 개수별 "전체 개수" 정확도, 테스트 36개). 출발 측정: "전체 개수" 1–6개 1.00, 7개 0.01(pass@8 0.12), 8개+ 0. 짧은 답은 운으로 맞음(count_shape greedy 0.25–0.60 vs pass@8 0.80–0.95) → 다수결 필터 + 대조군.
   세 실행(문제 40,000 × k=8, 300스텝/라운드, 10라운드, 동시 실행 라운드당 ~15분): majority frontier 7→9에서 정지(9개 다수결 정답 0), any 10에서 정지, oracle(정답 라벨) 16 도달. 전체 정확도 0.385 → 0.525 / 0.572 / 0.742. 모양 세기는 셋 다 0.23–0.30 정체. 교훈: 모델이 말하지 않는 답은 RSI가 만들 수 없다([탐색의 벽](lessons/2026-10-21-exploration-wall.md)).
+- 6단계 줄별 세기 (`tasks.py` `chain`/`parse_chain`/`row_counts`/`sum_question`, `vision.py` `--rows`/`--drill`/`--text`/`--max_new`, `evaluate`의 chain 통계, `sft.skills`). 답 "3+2=5+4=9+1=10", 텍스트 덧셈 연습 25%.
+  `vlm_rows`(LM 풀기, 4000스텝 2809초): 처음 보는 7·8개 1.00, 9개 0.71, 10개 0.36. 대조군 `vlm_rows_ctrl`(숫자 하나 답): 7개 이상 0 → 조합이 벽을 넘김. 4인 줄 정확도 0.87(학습 장면에서 꽉 찬 줄 0.19%).
+  망각: 덧셈 4/8/12/16자리 1.0 → 0, 이야기 단어 0.523 → 0.023. `vlm_rows_replay`(SFT 텍스트 배치 16 손실 합산): 덧셈 1.0/0.995/0.995/0.94, 이야기 0.640 보존, 대신 8개 0.52, 9개 0.12.
+  `vrsi_rows`(any 필터, 문제 20,000): frontier 9 → 15, 라운드 3에서 11개(pass@1 0.14) 학습 후 12–16개 동시 해결, 라운드 6–7 1–16개 모두 1.00, 전체 0.769.
+- 7단계 한국어: `Tokenizer.extend`(+ `--extend` CLI, `train`이 `extend`를 사용), `data.batches` 쉼표 shard 섞기(1개면 기존 난수열 유지), `train` shard별 val·여러 프롬프트, `get_data.sh ko`. 테스트 추가(확장 id 보존, shard 균등 섞기).
+  데이터 g0ster/TinyStories-Korean (MIT, 기계 번역) → [결정](decisions/2026-10-21-korean-data.md). tok_ko = tok_chat + 병합 8192 (vocab 16386): 한국어 1.01 → 6.53 bytes/token, 영어 인코딩 동일.
+  `ko_ext` vs `ko_byte`(바이트 대조군), runs/small에서 5000스텝, 한국어:영어 1:1, lr 5e-4: 한국어 0.497 대 0.714 bits/byte (학습 전 2.24 / 14.1), 영어 val 1.1638 → 1.2061 / 1.1895.

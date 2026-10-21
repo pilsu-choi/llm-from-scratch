@@ -37,6 +37,25 @@ class TestScenes(unittest.TestCase):
                 self.assertEqual(a, "no")
 
 
+    def test_row_by_row_answer(self):
+        from scratchlm.tasks import chain, parse_chain, row_counts, sum_question
+
+        objs = [("circle", "red", 0, 0), ("circle", "blue", 0, 3), ("square", "red", 2, 2)]
+        self.assertEqual(row_counts(objs), [2, 0, 1, 0])
+        self.assertEqual(chain([2, 0, 1, 0]), "2+0=2+1=3+0=3")
+        self.assertEqual(chain([3, 2, 4, 1]), "3+2=5+4=9+1=10")
+        self.assertEqual(parse_chain("3+2=5+4=9+1=10"), ([3, 2, 4, 1], [5, 9, 10]))
+        self.assertIsNone(parse_chain("3+2=5+4"))
+        rng = np.random.default_rng(0)
+        for _ in range(50):
+            q, a = question(rng, objs, rows=True)
+            if q == "How many shapes are there?":
+                self.assertEqual(a, "2+0=2+1=3+0=3")
+            q, a = sum_question(rng)
+            rows = [int(x) for x in q[len("What is ") : -1].split("+")]
+            self.assertEqual(parse_chain(a), (rows, list(np.cumsum(rows)[1:])))
+
+
 @unittest.skipUnless(HAS_TORCH, "torch not installed")
 class TestVLM(unittest.TestCase):
     def test_majority_filter_rejects_lucky_hits(self):

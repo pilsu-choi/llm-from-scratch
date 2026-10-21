@@ -24,8 +24,8 @@ PEAK_FLOPS = 68e12  # bf16 matmul measured on the GB10 in stage 0; MFU is relati
 @dataclass
 class TrainConfig:
     name: str = "small"
-    train: str = "data/ts_train.bin"
-    val: str = "data/ts_val.bin"
+    train: str = "data/ts_train.bin"  # comma-separated shards are mixed in equal shares (data.batches)
+    val: str = "data/ts_val.bin"  # comma-separated: one val loss per shard, `val` logs the first
     tok: str = "data/tok8k.json"
     init: str = ""  # start from these weights (e.g. pretrained ckpt for SFT); vocab grows to the tokenizer's
     batch: int = 64  # sequences per micro-batch
@@ -39,6 +39,7 @@ class TrainConfig:
     eval_every: int = 500
     eval_batches: int = 20
     ckpt_every: int = 1000
+    prompts: str = "Once upon a time"  # samples at each eval, "|"-separated
     compile: bool = True
     seed: int = 0
 
@@ -102,10 +103,12 @@ def main(tc=None, mc=None):
         emit(event="resume", step=start)
 
     train = batches(tc.train, tc.batch, mc.ctx_len, dev, seed=tc.seed + start)  # new seed on resume: no repeated windows
-    val_gen = batches(tc.val, tc.batch, mc.ctx_len, dev, seed=12345)
-    val = [next(val_gen) for _ in range(tc.eval_batches)]  # fixed val set: comparable across steps and runs
+    vals = {}  # fixed val sets: comparable across steps and runs
+    for p in tc.val.split(","):
+        g = batches(p, tc.batch, mc.ctx_len, dev, seed=12345)
+        vals[p] = [next(g) for _ in range(tc.eval_batches)]
     fwd = torch.compile(model) if tc.compile else model
-    prompt = torch.tensor([tok.encode("Once upon a time")], device=dev)
+    prompts = [torch.tensor([tok.encode(p)], device=dev) for p in tc.prompts.split("|")]
 
     def save(step):
         tmp = ckpt_path + ".tmp"
@@ -134,8 +137,10 @@ def main(tc=None, mc=None):
                  tok_s=round(tps), mfu=round(tps * flops_per_token / PEAK_FLOPS, 3))
             t0, loss_sum = time.time(), torch.zeros((), device=dev)
         if done % tc.eval_every == 0 or done == tc.steps:
-            sample = model.generate(prompt, 120, temperature=0.8, top_k=50)[0].tolist()
-            emit(step=done, val=round(evaluate(fwd, val), 4), sample=tok.decode(sample))
+            losses = {p: round(evaluate(fwd, v), 4) for p, v in vals.items()}
+            samples = [tok.decode(model.generate(p, 120, temperature=0.8, top_k=50)[0].tolist()) for p in prompts]
+            emit(step=done, val=next(iter(losses.values())), **({"vals": losses} if len(vals) > 1 else {}),
+                 sample=samples[0], **({"samples": samples} if len(samples) > 1 else {}))
             t0 = time.time()  # don't count eval time in throughput
         if done % tc.ckpt_every == 0 or done == tc.steps:
             save(done)

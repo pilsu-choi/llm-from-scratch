@@ -12,8 +12,8 @@ then make it improve itself with a **recursive self-improvement (RSI)** loop on 
 | 3 | Pretraining on TinyStories: hand-written AdamW, cosine LR, bf16, torch.compile — `scratchlm/train.py` | ✅ |
 | 4 | SFT: chat template, role tokens (vocab surgery), prompt masking, addition + story instructions — `scratchlm/sft.py`, `tasks.py` | ✅ |
 | 5 | RSI: generate → verify → retrain on own answers — `scratchlm/rsi.py`. 16-digit addition 7% → 100% in 10 rounds (41 min) | ✅ |
-| 6 | VLM: ViT + projector (LLaVA-style) — `scratchlm/vision.py`. Stage A (LM frozen, 17 min): 57.7% on synthetic-scene QA, 1 object 97%, unseen 7–10 objects 39→19%. Image RSI on counting: self-training stalls at 9–10 objects (the model never says an unseen number), true-label control reaches 16 | ✅ |
-| 7 | Korean extension | ⏳ |
+| 6 | VLM: ViT + projector (LLaVA-style) — `scratchlm/vision.py`. Stage A (LM frozen, 17 min): 57.7% on synthetic-scene QA, 1 object 97%, unseen 7–10 objects 39→19%. Image RSI on counting: self-training stalls at 9–10 objects (the model never says an unseen number), true-label control reaches 16. Answering row by row (`3+2=5+4=9+1=10`) breaks the wall: RSI reaches 1.00 on 1–16 objects in 7 rounds; SFT-text replay keeps the stage-5 skills | ✅ |
+| 7 | Korean: extend the English BPE with 8192 Korean merges (old ids kept), add embedding rows, continue pretraining on a 1:1 Korean/English mix. Korean 1.01 → 6.5 bytes/token; 0.497 vs 0.714 bits/byte for the byte-tokenizer control at equal compute; English val 1.164 → 1.206 | ✅ |
 
 Reference implementations for a later comparison: Karpathy's microgpt → nanoGPT → nanochat.
 
@@ -35,6 +35,11 @@ scripts/pgx.sh python -m scratchlm.sft prepare      # SFT shards (needs TinyStor
 scripts/pgx.sh python -m scratchlm.train --name sft --init runs/small/ckpt.pt --tok data/tok_chat.json --train data/sft_train.bin --val data/sft_val.bin --steps 2600 --lr 3e-4 --warmup 100   # (stage 5 used --name sft_pad)
 scripts/pgx.sh python -m scratchlm.sft eval runs/sft/ckpt.pt
 DETACH=rsi scripts/pgx.sh python -m scratchlm.rsi --init runs/sft_pad/ckpt.pt --rounds 10   # ~4 min/round
+DETACH=vlm scripts/pgx.sh python -m scratchlm.vision --name vlm                       # stage 6 VLM
+DETACH=vrsi_rows scripts/pgx.sh python -m scratchlm.vision rsi --name vrsi_rows --vlm runs/vlm_rows/ckpt.pt --freeze_lm false --lr 1e-4 --rows true --drill 0.25 --count_only true --max_new 16 --filter any --problems 20000 --rounds 12
+ssh pgx 'cd llm-from-scratch && bash scripts/get_data.sh ko'       # stage 7 Korean data
+scripts/pgx.sh python -m scratchlm.tokenizer data/TinyStories-Korean-train.txt data/tok_ko.json --extend data/tok_chat.json --vocab 8192 --max-mb 30
+DETACH=ko_ext scripts/pgx.sh python -m scratchlm.train --name ko_ext --tok data/tok_ko.json --init runs/small/ckpt.pt --train data/ko_train.bin,data/ts_train.bin --val data/ko_val.bin,data/ts_val.bin --steps 5000 --lr 5e-4 --warmup 200
 scripts/pgx.sh rm -rf runs/<name>   # runs/ is root-owned: delete from inside the container
 ```
 
