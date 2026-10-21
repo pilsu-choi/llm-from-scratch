@@ -150,7 +150,7 @@ _newest (6): _ n e w e s t
 로컬 테스트:
 
 ```bash
-python3 -m unittest -v
+uv run --no-project --with numpy python -m unittest -v
 ```
 
 테스트: lossless pre-tokenize, 학습 후 roundtrip(처음 보는 한글/이모지 포함)과 압축 확인, special 토큰 id 및 save/load 일관성.

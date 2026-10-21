@@ -14,3 +14,6 @@ title: 작업 로그
   한국어 문장 50 bytes → **50 tokens** (merge 없음 = 바이트 그대로) — 7단계 한국어 확장의 동기.
 - 결정: 숫자 한 자리씩 토큰화(`\d`)로 변경 후 tok8k 재학습. 압축률 변화 없음(4.10), `3051` → `3|0|5|1`.
 - 의존성 정책 확정: 외부 의존성 `torch` 하나(저수준만). `numpy` 선언 제거, 테스트 pytest → stdlib unittest. 로드맵에 1.5단계(stdlib autograd) 추가.
+- 의존성 정책 수정(소유자): `numpy` 허용 → 외부 의존성 `numpy` + `torch`. 1.5단계를 스칼라 autograd 대신 **numpy tensor autograd**로.
+- 1.5단계: `scratchlm/autograd.py` (add/mul/pow/matmul/exp/log/tanh/relu/sum/mean/reshape/getitem, fused cross_entropy) + finite-difference gradcheck 테스트 5개.
+  데모 byte-level MLP LM(121k params, ctx 8): val loss 5.46 → **1.51** (6000 steps, PGX CPU ~10초).
