@@ -18,6 +18,11 @@ def test_roundtrip_and_compression():
     assert len(tok.encode(TEXTS[0])) < len(TEXTS[0].encode())
 
 
+def test_digits_are_single_tokens():
+    tok = Tokenizer.train(["12 123 1234 100+200=300"] * 50, vocab_size=400)
+    assert [tok.decode([i]) for i in tok.encode("3051+47")] == list("3051+47")
+
+
 def test_specials_and_save_load(tmp_path):
     tok = Tokenizer.train(TEXTS, vocab_size=300, specials=["<|endoftext|>"])
     eot = tok.specials["<|endoftext|>"]

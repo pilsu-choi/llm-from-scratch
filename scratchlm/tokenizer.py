@@ -11,8 +11,8 @@ import sys
 from collections import Counter, defaultdict
 
 # GPT-2 style split using stdlib `re`: contractions, words (with leading space),
-# 1-3 digit groups, punctuation runs, whitespace. Merges never cross chunk borders.
-PAT = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?[^\W\d_]+| ?\d{1,3}| ?(?:[^\s\w]|_)+|\s+(?!\S)|\s+""")
+# single digits (so arithmetic sees one token per digit), punctuation runs, whitespace. Merges never cross chunk borders.
+PAT = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?[^\W\d_]+|\d| ?(?:[^\s\w]|_)+|\s+(?!\S)|\s+""")
 
 
 def merge(ids, pair, new):

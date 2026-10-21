@@ -47,7 +47,7 @@ UTF-8에서 ASCII 영문 1글자 = 1 byte, **한글 1글자 = 3 bytes**다.
 ## 3. Pre-tokenization 정규식 (PAT)
 
 ```python
-PAT = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?[^\W\d_]+| ?\d{1,3}| ?(?:[^\s\w]|_)+|\s+(?!\S)|\s+""")
+PAT = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?[^\W\d_]+|\d| ?(?:[^\s\w]|_)+|\s+(?!\S)|\s+""")
 ```
 
 GPT-2 스타일 분할. 각 alternative:
@@ -56,7 +56,7 @@ GPT-2 스타일 분할. 각 alternative:
 |---|---|
 | `'(?:[sdmt]\|ll\|ve\|re)` | 축약형 `'s 'd 'm 't 'll 've 're` |
 | ` ?[^\W\d_]+` | (선택적 앞 공백) + 유니코드 **글자** 연속. `\w`에서 숫자와 `_`를 뺀 것 |
-| ` ?\d{1,3}` | (공백) + 숫자 1~3자리 묶음 |
+| `\d` | 숫자 **한 자리씩** (앞 공백 없음). GPT-2는 ` ?\p{N}+`, GPT-4는 `\p{N}{1,3}`, LLaMA 계열은 한 자리씩 |
 | ` ?(?:[^\s\w]\|_)+` | (공백) + 구두점/기호/이모지/`_` 연속 |
 | `\s+(?!\S)` | 뒤에 비공백이 오지 않는 공백 (마지막 공백 하나는 다음 단어에 붙도록 남김) |
 | `\s+` | 나머지 공백 |
@@ -65,9 +65,15 @@ GPT-2 스타일 분할. 각 alternative:
 
 - **merge가 chunk 경계를 넘지 않는다.** 각 chunk를 따로 바이트열로 만들어 merge하므로 `dog.`의 `g`와 `.`이 합쳐지는 일이 없다. 의미 단위가 깨끗하게 유지되고 `the`/` the`처럼 공백 유무만 다른 변형이 분리된다.
 - **효율**: 학습 시 chunk 단위로 중복을 제거할 수 있다 (4절).
-- **반드시 lossless**여야 한다. `"".join(PAT.findall(t)) == t`가 아니면 일부 문자가 어떤 alternative에도 안 걸려 사라지고, decode(encode(x)) != x가 된다. `tests/test_tokenizer.py::test_pretokenize_is_lossless`가 영어/한글/숫자/이모지/탭/`\r\n`/`_`로 이를 검증한다. (마지막 `\s+`가 안전망 역할.)
+- **반드시 lossless**여야 한다. `"".join(PAT.findall(t)) == t`가 아니면 일부 문자가 어떤 alternative에도 안 걸려 사라지고, decode(encode(x)) != x가 된다. `tests/test_tokenizer.py::test_pretokenize_is_lossless`가 영어/한글/숫자/이모지/탭/`\r\n`/`_`로 이를 검증한다. (정규식 자체에는 안전망이 없다: 어느 alternative에도 안 걸리는 문자는 `findall`에서 **조용히 버려진다**. 테스트가 유일한 안전망이다.)
 
 주의: GPT-2 원본은 서드파티 `regex` 패키지의 `\p{L}`, `\p{N}`을 쓴다. 이 프로젝트는 stdlib `re`만 쓰려고 `[^\W\d_]`(= 유니코드 글자)로 대체했다. `²`처럼 `\w`이지만 `\d`(10진수)는 아닌 문자는 글자 클래스 `[^\W\d_]` 쪽으로 분류되는 등 사소한 차이가 있지만 lossless는 유지된다.
+
+### 숫자를 한 자리씩 자르는 이유
+
+5단계 RSI의 검증 과제는 여러 자리 산술이다. 숫자 묶음 안에서 merge가 일어나면 같은 숫자 `7`이 `47`, `7`, `170` 안에서 서로 다른 토큰이 되어
+모델이 자릿수 정렬(carry)을 배우기 어렵다. `\d` 한 자리 chunk로 고정하면 **모든 숫자가 0~9 열 개 토큰**으로만 표현된다.
+공백도 숫자에 붙지 않으므로 `" 3"`과 `"3"`이 같은 숫자 토큰을 쓴다 (공백은 별도 토큰). 토크나이저는 3~5단계 내내 고정이므로 지금 결정해야 한다.
 
 ## 4. 학습 알고리즘
 
@@ -136,7 +142,7 @@ _newest (6): _ n e w e s t
 1. **압축률 비교**: TinyStories valid에서 vocab 1024 / 8192 / 32768로 각각 학습(`--vocab`, 파일은 `--max-mb`로 제한)한 뒤, `bytes / tokens` 비율을 표로 정리하라. 증가폭이 어디서 둔화되는가? embedding 파라미터(`V x d`)와 함께 비교해 보자.
 2. **한국어 비용**: 8k tokenizer로 `"옛날 옛적에 작은 강아지가 살았어요."`를 encode해 토큰 수와 UTF-8 바이트 수를 비교하고, 같은 뜻의 영어 문장과 토큰 수 비율을 구하라. 토큰 하나씩 `decode([i])` 하면 `�`가 보이는가?
 3. **첫 50개 merge 보기**: `tok.merges`를 순회하며 `tok.vocab[new]`를 출력. 공백+단어(` the`)나 `er`, `ing` 같은 조각이 먼저 나오는지 관찰하라.
-4. **PAT 해부**: `PAT.findall("He didn't like_rain!! 안녕 123456")`를 출력해 chunk를 눈으로 확인하고, ` ?\d{1,3}` 줄을 지우면 `test_pretokenize_is_lossless`와 압축률이 어떻게 변하는지 보라.
+4. **PAT 해부**: `PAT.findall("He didn't like_rain!! 안녕 123456")`를 출력해 chunk를 눈으로 확인하고, `\d` alternative를 지우면 `test_pretokenize_is_lossless`와 압축률이 어떻게 변하는지 보라.
 5. **코드 읽기 질문**: `where` 인덱스가 stale일 때 `stats`를 잘못 빼지 않는가? (힌트: word 안에 쌍이 실제로 있는지와 `stats[p] <= 0` 삭제를 따져 보라.) 그리고 `encode`의 `min(...)` 대신 rank 정렬 후 순차 적용으로 바꾸면 결과가 같은가?
 
 ## 8. 실행 방법
