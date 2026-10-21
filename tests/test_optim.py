@@ -66,6 +66,15 @@ class TestOptim(unittest.TestCase):
             self.assertEqual(x.shape, (4, 16))
             torch.testing.assert_close(y, x + 1)  # target = input shifted by one token
 
+    def test_batches_mix_shards_equally(self):
+        with tempfile.TemporaryDirectory() as d:
+            a, b = os.path.join(d, "a.bin"), os.path.join(d, "b.bin")
+            np.arange(0, 1000, dtype=np.uint16).tofile(a)
+            np.arange(5000, 6000, dtype=np.uint16).tofile(b)
+            x, y = next(batches(f"{a},{b}", 6, 16, "cpu"))
+            self.assertEqual(((x < 1000).all(1)).tolist(), [True, False] * 3)  # rows alternate a, b, a, ...
+            torch.testing.assert_close(y, x + 1)
+
 
 if __name__ == "__main__":
     unittest.main()

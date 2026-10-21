@@ -47,18 +47,28 @@ def prepare(txt_path, tok_path, out_path, workers=16):
 
 def batches(path, batch, ctx_len, device, seed=0):
     """Endless (x, y) int64 batches of random windows from a uint16 shard.
-    If `<shard minus .bin>.mask` exists (SFT), targets whose mask is 0 (prompt tokens) become -1 = ignored."""
-    data = np.memmap(path, dtype=np.uint16, mode="r")
-    mask_path = path[: -len(".bin")] + ".mask"
-    mask = np.memmap(mask_path, dtype=np.uint8, mode="r") if os.path.exists(mask_path) else None
+    If `<shard minus .bin>.mask` exists (SFT), targets whose mask is 0 (prompt tokens) become -1 = ignored.
+    A comma-separated list of shards mixes them: window j of each batch comes from shard j % n (equal shares)."""
+    shards = []
+    for p in path.split(","):
+        mask_path = p[: -len(".bin")] + ".mask"
+        mask = np.memmap(mask_path, dtype=np.uint8, mode="r") if os.path.exists(mask_path) else None
+        shards.append((np.memmap(p, dtype=np.uint16, mode="r"), mask))
     rng = np.random.default_rng(seed)
+    which = [shards[j % len(shards)] for j in range(batch)]
+    highs = np.array([len(d) - ctx_len - 1 for d, _ in which])
     while True:
-        starts = rng.integers(0, len(data) - ctx_len - 1, batch)
-        w = np.stack([data[s : s + ctx_len + 1] for s in starts]).astype(np.int64)
-        x, y = w[:, :-1], w[:, 1:].copy()
-        if mask is not None:
-            y[np.stack([mask[s + 1 : s + ctx_len + 1] for s in starts]) == 0] = -1
-        xy = torch.from_numpy(np.stack([x, y]))
+        # one shard: the same random stream as before mixing existed, so earlier runs reproduce
+        starts = rng.integers(0, highs[0], batch) if len(shards) == 1 else rng.integers(0, highs)
+        xs, ys = [], []
+        for (data, mask), s in zip(which, starts):
+            w = data[s : s + ctx_len + 1].astype(np.int64)
+            y = w[1:].copy()
+            if mask is not None:
+                y[mask[s + 1 : s + ctx_len + 1] == 0] = -1
+            xs.append(w[:-1])
+            ys.append(y)
+        xy = torch.from_numpy(np.stack([np.stack(xs), np.stack(ys)]))
         if device == "cuda":
             xy = xy.pin_memory().to(device, non_blocking=True)  # async host->GPU copy
         yield xy[0], xy[1]
