@@ -51,14 +51,21 @@ def prepare(tok_path="data/tok8k.json", seed=0):
 def evaluate(ckpt_path, tok_path="data/tok_chat.json", n_story=100):
     tok = Tokenizer.load(tok_path)
     model = load_checkpoint(ckpt_path, vocab_size=tok.vocab_size).eval()  # a pretrained ckpt gets the role tokens too
-    res = {"addition": addition_accuracy(model, tok)}
+    res = skills(model, tok, n_story)
+    print(json.dumps(res, indent=1, ensure_ascii=False))
+    return res
+
+
+@torch.no_grad()
+def skills(model, tok, n_story=100, digits=range(1, 17)):
+    """The two text skills: greedy addition accuracy per digit count, and the share of required story words used."""
+    res = {"addition": addition_accuracy(model, tok, digits)}
     with open("data/TinyStories-Instruct-valid.txt", encoding="utf-8") as f:
         stories = [e for e in map(parse_instruct, f.read().split(EOT)) if e and words_used(e[0], "") is not None][:n_story]
     torch.manual_seed(0)
     replies = [reply(model, tok, [p], 300, temperature=0.8)[0] for p, _ in stories]
     res["story_words_used"] = round(sum(words_used(p, r) for (p, _), r in zip(stories, replies)) / len(stories), 3)
     res["example"] = {"prompt": stories[0][0], "reply": replies[0]}
-    print(json.dumps(res, indent=1, ensure_ascii=False))
     return res
 
 

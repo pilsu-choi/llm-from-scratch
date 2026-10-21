@@ -94,8 +94,42 @@ def render(objs, rng):
     return img
 
 
-def question(rng, objs):
-    """A random question about the scene and its exact answer (the verifier is string equality)."""
+def chain(rows):
+    """Running sum over per-row counts: [3, 2, 4, 1] -> "3+2=5+4=9+1=10". Every step adds a number <= GRID."""
+    out, total = str(rows[0]), rows[0]
+    for r in rows[1:]:
+        total += r
+        out += f"+{r}={total}"
+    return out
+
+
+def parse_chain(s):
+    """Inverse of chain: (rows, running sums) or None if malformed."""
+    try:
+        parts = s.split("+")
+        rows, sums = [int(parts[0])], []
+        for p in parts[1:]:
+            r, t = p.split("=")
+            rows.append(int(r))
+            sums.append(int(t))
+        return rows, sums
+    except ValueError:
+        return None
+
+
+def row_counts(objs):
+    return [sum(o[2] == r for o in objs) for r in range(GRID)]
+
+
+def sum_question(rng):
+    """Text-only arithmetic in the same chain format (the image is blank): teaches small sums up to GRID * GRID."""
+    rows = [int(x) for x in rng.integers(0, GRID + 1, GRID)]
+    return f"What is {'+'.join(map(str, rows))}?", chain(rows)
+
+
+def question(rng, objs, rows=False):
+    """A random question about the scene and its exact answer (the verifier is string equality).
+    rows=True answers "How many shapes" by counting row by row (`chain`) instead of with a single number."""
     kind = rng.integers(5)
     shape, color = str(rng.choice(SHAPES)), str(rng.choice(list(COLORS)))
     if kind == 1:
@@ -111,7 +145,7 @@ def question(rng, objs):
         if unique:
             o = unique[rng.integers(len(unique))]
             return f"What color is the {o[0]}?", o[1]
-    return "How many shapes are there?", str(len(objs))
+    return "How many shapes are there?", chain(row_counts(objs)) if rows else str(len(objs))
 
 
 # ---- story instructions (TinyStories-Instruct) ---------------------------------------------------
