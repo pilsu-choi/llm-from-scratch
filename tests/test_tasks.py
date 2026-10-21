@@ -45,7 +45,7 @@ class TestTasks(unittest.TestCase):
     def test_chat_template_masks_prompt(self):
         base = Tokenizer.train(["What is 1 + 2? 3"] * 5, vocab_size=300, specials=["<|endoftext|>"])
         tok = chat_tokenizer(base)
-        self.assertEqual(tok.vocab_size, base.vocab_size + 2)
+        self.assertEqual(tok.vocab_size, base.vocab_size + 3)  # user, assistant, image
         ids, mask = encode_chat(tok, "What is 1 + 2?", "3")
         start = ids.index(tok.specials[ASSISTANT]) + 1
         self.assertEqual(ids[0], tok.specials[USER])

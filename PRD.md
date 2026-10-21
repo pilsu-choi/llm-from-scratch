@@ -39,7 +39,7 @@ LLM과 VLM이 **어떻게 동작하고 학습되는지**를 직접 만들면서 
 | 3 | 사전학습 | 직접 만든 AdamW + warmup/cosine + bf16 + grad accum으로 small(29.9M) 학습. val loss 곡선과 샘플을 기록하고, 문법적으로 맞는 TinyStories 문장을 생성. checkpoint 저장/재개 | ⏳ |
 | 4 | SFT | chat 템플릿 + prompt loss masking. 지시(질문→답) 형식을 따르는 비율을 측정. 산술 과제의 iteration 0 정확도 > 0. **개정(2026-10-21, 소유자 결정)**: 덧셈은 16자리 고정 폭 + 답 거꾸로 + shift, 학습 1–7자리, frontier는 '정확도 0.9 미만인 첫 자릿수' | ✅ (1–8자리 1.00, 12자리 0.88, 16자리 0.065; 단어 18→61%) |
 | 5 | RSI | 생성 → verifier 필터 → 재학습을 N회 반복. held-out 정확도가 iteration마다 오르는지, 다양성(distinct-n, pass@k)이 붕괴하는지 기록. 커리큘럼(자릿수 증가) 효과 측정 | ✅ (10라운드 41분: 16자리 0.07 → 1.00, round 2 급락·회복 관찰, 이야기 0.61 → 0.52 망각) |
-| 6 | VLM | 직접 만든 ViT + projector를 LM에 연결. 합성 이미지(도형·개수·색) QA 정확도 측정. 같은 RSI 루프를 이미지 과제에 적용 | ⏳ |
+| 6 | VLM | 직접 만든 ViT + projector를 LM에 연결. 합성 이미지(도형·개수·색) QA 정확도 측정. 같은 RSI 루프를 이미지 과제에 적용 | 🔄 (A단계: 전체 0.577, 도형 1개 0.97, 처음 보는 7–10개 0.39→0.19. 이미지 RSI 남음) |
 | 7 | 한국어 | 토크나이저 확장(vocab surgery) 또는 재학습으로 한국어 bytes/token 개선 (현재 1.0) + continued pretraining 후 한국어 샘플 품질 비교 | ⏳ |
 
 ## 5. RSI 설계 (핵심 요구사항)

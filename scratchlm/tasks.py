@@ -9,12 +9,12 @@ import numpy as np
 
 from .tokenizer import Tokenizer
 
-USER, ASSISTANT, EOT = "<|user|>", "<|assistant|>", "<|endoftext|>"
+USER, ASSISTANT, EOT, IMAGE = "<|user|>", "<|assistant|>", "<|endoftext|>", "<|image|>"
 
 
 def chat_tokenizer(tok):
-    """Same merges, plus the two role tokens appended after the existing ids (the model's vocab grows by 2)."""
-    new = [s for s in (USER, ASSISTANT) if s not in tok.specials]
+    """Same merges, plus the role tokens and the image placeholder appended after the existing ids (vocab grows)."""
+    new = [s for s in (USER, ASSISTANT, IMAGE) if s not in tok.specials]
     return Tokenizer(tok.merges, {**tok.specials, **{s: tok.vocab_size + i for i, s in enumerate(new)}})
 
 
@@ -60,6 +60,58 @@ def check_addition(prompt, reply):
     """Verifier: the reply must be exactly the padded, reversed sum."""
     a, b = map(int, re.findall(r"\d+", prompt))
     return reply.strip() == _answer(a, b)
+
+
+# ---- synthetic scenes: images whose answers are known by construction ---------------------------
+
+COLORS = {"red": (220, 50, 50), "green": (50, 190, 70), "blue": (60, 90, 230), "yellow": (235, 215, 50), "purple": (160, 70, 200)}
+SHAPES = ("circle", "square", "triangle")
+IMG, GRID = 64, 4  # 64x64 pixels, shapes placed in distinct cells of a 4x4 grid (16 px each, so they never overlap)
+
+
+def scene(rng, n):
+    """n objects, each (shape, color, row, col) in distinct grid cells."""
+    cells = rng.choice(GRID * GRID, n, replace=False)
+    return [(str(rng.choice(SHAPES)), str(rng.choice(list(COLORS))), int(c) // GRID, int(c) % GRID) for c in cells]
+
+
+def render(objs, rng):
+    """uint8 (IMG, IMG, 3) black canvas; each shape ~10-13 px with a little jitter inside its cell."""
+    img = np.zeros((IMG, IMG, 3), np.uint8)
+    yy, xx = np.mgrid[:IMG, :IMG]
+    cell = IMG // GRID
+    for shape, color, r, c in objs:
+        h = rng.integers(5, 7)  # half size
+        cy, cx = r * cell + cell // 2 + rng.integers(-1, 2), c * cell + cell // 2 + rng.integers(-1, 2)
+        dy, dx = yy - cy, xx - cx
+        if shape == "circle":
+            m = dy**2 + dx**2 <= h * h
+        elif shape == "square":
+            m = (abs(dy) <= h - 1) & (abs(dx) <= h - 1)
+        else:  # triangle pointing up: rows widen from the apex
+            m = (dy >= -h) & (dy <= h) & (abs(dx) <= (dy + h) / 2)
+        img[m] = COLORS[color]
+    return img
+
+
+def question(rng, objs):
+    """A random question about the scene and its exact answer (the verifier is string equality)."""
+    kind = rng.integers(5)
+    shape, color = str(rng.choice(SHAPES)), str(rng.choice(list(COLORS)))
+    if kind == 1:
+        return f"How many {color} shapes are there?", str(sum(o[1] == color for o in objs))
+    if kind == 2:
+        return f"How many {shape}s are there?", str(sum(o[0] == shape for o in objs))
+    if kind == 3:
+        if rng.random() < 0.5:  # ask about a present object half the time, so "yes" is not rare
+            shape, color = objs[rng.integers(len(objs))][:2]
+        return f"Is there a {color} {shape}?", "yes" if any(o[:2] == (shape, color) for o in objs) else "no"
+    if kind == 4:
+        unique = [o for o in objs if sum(p[0] == o[0] for p in objs) == 1]
+        if unique:
+            o = unique[rng.integers(len(unique))]
+            return f"What color is the {o[0]}?", o[1]
+    return "How many shapes are there?", str(len(objs))
 
 
 # ---- story instructions (TinyStories-Instruct) ---------------------------------------------------

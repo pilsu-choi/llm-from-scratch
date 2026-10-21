@@ -22,6 +22,7 @@ class Config:
     rope_theta: float = 10000.0
     tie_embeddings: bool = True
     sdpa: bool = True  # False = hand-written attention (same math, materializes the T x S matrix)
+    causal: bool = True  # False = every token sees every token (the vision encoder)
 
     @property
     def d_ff(self):  # SwiGLU has 3 matrices, so 8/3*d keeps params equal to a 4*d two-matrix MLP
@@ -75,7 +76,7 @@ def apply_rope(x, cos, sin):
 class Attention(nn.Module):
     def __init__(self, c):
         super().__init__()
-        self.n_head, self.head_dim, self.sdpa = c.n_head, c.d_model // c.n_head, c.sdpa
+        self.n_head, self.head_dim, self.sdpa, self.causal = c.n_head, c.d_model // c.n_head, c.sdpa, c.causal
         self.qkv = Linear(c.d_model, 3 * c.d_model)
         self.proj = Linear(c.d_model, c.d_model, std=0.02 / math.sqrt(2 * c.n_layer))
 
@@ -88,13 +89,22 @@ class Attention(nn.Module):
                 k, v = torch.cat([cache["k"], k], 2), torch.cat([cache["v"], v], 2)
             cache["k"], cache["v"] = k, v
         S = k.shape[2]
-        mask = torch.ones(T, S, dtype=torch.bool, device=x.device).tril(S - T)  # query t sees keys <= its position
+        mask = torch.ones(T, S, dtype=torch.bool, device=x.device)
+        if self.causal:
+            mask = mask.tril(S - T)  # query t sees keys <= its position
         if self.sdpa:
-            y = F.scaled_dot_product_attention(q, k, v, is_causal=True) if T == S else F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+            if not self.causal:
+                y = F.scaled_dot_product_attention(q, k, v)
+            else:
+                y = F.scaled_dot_product_attention(q, k, v, is_causal=True) if T == S else F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
         else:
             att = (q @ k.transpose(-1, -2)) / math.sqrt(self.head_dim)
             y = att.masked_fill(~mask, float("-inf")).softmax(-1) @ v
         return self.proj(y.transpose(1, 2).reshape(B, T, C))
+
+
+def silu(x):
+    return x * torch.sigmoid(x)
 
 
 class SwiGLU(nn.Module):
@@ -104,8 +114,7 @@ class SwiGLU(nn.Module):
         self.down = Linear(c.d_ff, c.d_model, std=0.02 / math.sqrt(2 * c.n_layer))
 
     def forward(self, x):
-        g = self.gate(x)
-        return self.down(g * torch.sigmoid(g) * self.up(x))  # silu(gate) acts as a learned, smooth gate on up
+        return self.down(silu(self.gate(x)) * self.up(x))  # silu(gate) acts as a learned, smooth gate on up
 
 
 class Block(nn.Module):
@@ -138,21 +147,22 @@ class GPT(nn.Module):
         self.register_buffer("cos", cos, persistent=False)
         self.register_buffer("sin", sin, persistent=False)
 
-    def forward(self, ids, targets=None, caches=None):
+    def forward(self, ids, targets=None, caches=None, embeds=None):
+        """`embeds` replaces the token embeddings (the VLM splices image features into them); `ids` still gives the length."""
         T = ids.shape[1]
         pos = caches[0]["k"].shape[2] if caches and caches[0] else 0
         assert pos + T <= self.c.ctx_len, "sequence longer than ctx_len"
         cos, sin = self.cos[pos : pos + T], self.sin[pos : pos + T]
-        x = self.embed(ids)
+        x = self.embed(ids) if embeds is None else embeds
         for i, block in enumerate(self.blocks):
             x = block(x, cos, sin, caches[i] if caches else None)
         logits = self.norm(x) @ (self.embed if self.head is None else self.head).weight.T
         return logits if targets is None else (logits, cross_entropy(logits, targets))
 
     @torch.no_grad()
-    def generate(self, ids, max_new, temperature=1.0, top_k=None):
+    def generate(self, ids, max_new, temperature=1.0, top_k=None, embeds=None):
         caches = [{} for _ in self.blocks]
-        logits = self(ids, caches=caches)[:, -1]  # prefill: whole prompt in one pass
+        logits = self(ids, caches=caches, embeds=embeds)[:, -1]  # prefill: whole prompt in one pass
         for _ in range(max_new):
             if temperature == 0:
                 nxt = logits.argmax(-1, keepdim=True)
