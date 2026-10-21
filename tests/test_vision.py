@@ -39,6 +39,26 @@ class TestScenes(unittest.TestCase):
 
 @unittest.skipUnless(HAS_TORCH, "torch not installed")
 class TestVLM(unittest.TestCase):
+    def test_majority_filter_rejects_lucky_hits(self):
+        from scratchlm.vision import majority
+
+        self.assertTrue(majority(["7", "7", "6", "8"], "7"))
+        self.assertFalse(majority(["7", "6", "6", "8"], "7"))  # one lucky hit, the model mostly says 6
+        self.assertFalse(majority(["7", "7", "6", "6"], "7"))  # a tie is not a majority
+        self.assertFalse(majority(["6", "6"], "7"))
+
+    def test_batch_masks_all_but_the_answer(self):
+        from scratchlm.tasks import EOT, chat_tokenizer
+        from scratchlm.tokenizer import Tokenizer
+        from scratchlm.vision import examples, make_batch
+
+        tok = chat_tokenizer(Tokenizer.train(["How many shapes are there? red blue 0123456789"], 280, [EOT]))
+        exs = examples(np.random.default_rng(0), 4, [3])
+        x, imgs, y = make_batch(tok, exs, 96, "cpu")
+        self.assertEqual((x.shape, imgs.shape), ((4, 96), (4, IMG, IMG, 3)))
+        for row, (_, _, _, a) in zip(y, exs):
+            self.assertEqual(tok.decode(row[row >= 0].tolist()), a + EOT)
+
     def test_image_features_replace_placeholders(self):
         import torch
 

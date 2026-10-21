@@ -12,7 +12,7 @@ then make it improve itself with a **recursive self-improvement (RSI)** loop on 
 | 3 | Pretraining on TinyStories: hand-written AdamW, cosine LR, bf16, torch.compile — `scratchlm/train.py` | ✅ |
 | 4 | SFT: chat template, role tokens (vocab surgery), prompt masking, addition + story instructions — `scratchlm/sft.py`, `tasks.py` | ✅ |
 | 5 | RSI: generate → verify → retrain on own answers — `scratchlm/rsi.py`. 16-digit addition 7% → 100% in 10 rounds (41 min) | ✅ |
-| 6 | VLM: ViT + projector (LLaVA-style) — `scratchlm/vision.py`. Stage A (LM frozen, 17 min): 57.7% on synthetic-scene QA, 1 object 97%, unseen 7–10 objects 39→19% | 🔄 |
+| 6 | VLM: ViT + projector (LLaVA-style) — `scratchlm/vision.py`. Stage A (LM frozen, 17 min): 57.7% on synthetic-scene QA, 1 object 97%, unseen 7–10 objects 39→19%. Image RSI on counting: self-training stalls at 9–10 objects (the model never says an unseen number), true-label control reaches 16 | ✅ |
 | 7 | Korean extension | ⏳ |
 
 Reference implementations for a later comparison: Karpathy's microgpt → nanoGPT → nanochat.
