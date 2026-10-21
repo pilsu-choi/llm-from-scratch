@@ -1,4 +1,4 @@
-"""SFT data: TinyStories-Instruct stories + 1-3 digit addition, packed into masked uint16 shards.
+"""SFT data: TinyStories-Instruct stories + 1-7 digit addition, packed into masked uint16 shards.
 
     python -m scratchlm.sft prepare      # data/sft_{train,val}.bin + .mask, data/tok_chat.json
     python -m scratchlm.sft eval runs/<name>/ckpt.pt
@@ -14,7 +14,7 @@ from .model import load_checkpoint
 from .tasks import EOT, addition, addition_accuracy, chat_tokenizer, encode_chat, parse_instruct, reply, words_used
 from .tokenizer import Tokenizer
 
-SFT_DIGITS = (1, 2, 3)  # trained on; 4+ digits are held out to measure generalization (and for RSI)
+SFT_DIGITS = tuple(range(1, 8))  # operand lengths trained on; 8+ digits are held out (the RSI frontier)
 
 
 def examples(instruct_path, n_add, seed):
@@ -22,7 +22,7 @@ def examples(instruct_path, n_add, seed):
         ex = [e for e in map(parse_instruct, f.read().split(EOT)) if e]
     n_story = len(ex)
     rng = np.random.default_rng(seed)
-    ex += [addition(rng, SFT_DIGITS[i % len(SFT_DIGITS)]) for i in range(n_add)]
+    ex += [addition(rng, *rng.choice(SFT_DIGITS, 2)) for _ in range(n_add)]  # operand lengths drawn independently
     random.Random(seed).shuffle(ex)
     return ex, n_story
 
@@ -41,7 +41,7 @@ def write_shard(tok, ex, out):
 def prepare(tok_path="data/tok8k.json", seed=0):
     tok = chat_tokenizer(Tokenizer.load(tok_path))
     tok.save("data/tok_chat.json")
-    for split, src, n_add in (("train", "data/TinyStories-Instruct-train200M.txt", 600_000), ("val", "data/TinyStories-Instruct-valid.txt", 6_000)):
+    for split, src, n_add in (("train", "data/TinyStories-Instruct-train200M.txt", 1_500_000), ("val", "data/TinyStories-Instruct-valid.txt", 15_000)):
         ex, n_story = examples(src, n_add, seed)
         n, n_trained = write_shard(tok, ex, f"data/sft_{split}")
         print(f"sft_{split}: {n_story:,} stories + {n_add:,} additions, {n:,} tokens ({n_trained / n:.0%} trained on)")

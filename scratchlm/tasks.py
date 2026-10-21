@@ -28,17 +28,21 @@ def encode_chat(tok, prompt, answer):
 # ---- addition: verifiable by construction --------------------------------------------------------
 
 
-def addition(rng, n_digits):
-    """A random n-digit + n-digit problem (no leading zeros). Returns (prompt, answer)."""
-    lo, hi = 10 ** (n_digits - 1) if n_digits > 1 else 0, 10**n_digits
-    a, b = rng.integers(lo, hi, 2)
-    return f"What is {a} + {b}?", str(a + b)
+def _number(rng, d):
+    return int(rng.integers(10 ** (d - 1) if d > 1 else 0, 10**d))  # exactly d digits, no leading zero
+
+
+def addition(rng, da, db=None):
+    """A random da-digit + db-digit problem. The answer is written **reversed** (ones digit first): each output
+    digit then depends only on digits already seen plus one carry, which is what lets length generalize."""
+    a, b = _number(rng, da), _number(rng, da if db is None else db)
+    return f"What is {a} + {b}?", str(a + b)[::-1]
 
 
 def check_addition(prompt, reply):
-    """Verifier: the reply must be exactly the integer sum."""
+    """Verifier: the reply must be exactly the reversed integer sum."""
     a, b = map(int, re.findall(r"\d+", prompt))
-    return reply.strip() == str(a + b)
+    return reply.strip() == str(a + b)[::-1]
 
 
 # ---- story instructions (TinyStories-Instruct) ---------------------------------------------------
@@ -77,18 +81,18 @@ def words_used(prompt, reply):
 # ---- evaluation ----------------------------------------------------------------------------------
 
 
-def reply(model, tok, prompts, max_new, temperature=0.0):
-    """Generate replies for prompts of equal token length (batched), cut at <|endoftext|>."""
+def reply(model, tok, prompts, max_new, temperature=0.0, chunk=2048):
+    """Generate replies for prompts of equal token length (batched, `chunk` rows at a time), cut at <|endoftext|>."""
     import torch  # verifiers above stay torch-free
 
     ids = [tok.encode(USER + p + ASSISTANT) for p in prompts]
     assert len({len(i) for i in ids}) == 1, "batch prompts must have the same token length"
-    dev = next(model.parameters()).device
-    out = model.generate(torch.tensor(ids, device=dev), max_new, temperature=temperature, top_k=50 if temperature else None)
-    eot = tok.specials[EOT]
-    res = []
-    for row in out[:, len(ids[0]) :].tolist():
-        res.append(tok.decode(row[: row.index(eot)] if eot in row else row))
+    dev, eot, res = next(model.parameters()).device, tok.specials[EOT], []
+    for c in range(0, len(ids), chunk):
+        x = torch.tensor(ids[c : c + chunk], device=dev)
+        out = model.generate(x, max_new, temperature=temperature, top_k=50 if temperature else None)
+        for row in out[:, x.shape[1] :].tolist():
+            res.append(tok.decode(row[: row.index(eot)] if eot in row else row))
     return res
 
 

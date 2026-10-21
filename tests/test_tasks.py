@@ -20,12 +20,13 @@ Summary: Tom plays with his ball.
 
 class TestTasks(unittest.TestCase):
     def test_addition_and_verifier(self):
+        self.assertTrue(check_addition("What is 25 + 17?", "24"))  # 42 written ones-digit first
+        self.assertFalse(check_addition("What is 25 + 17?", "42"))
         rng = np.random.default_rng(0)
-        for d in (1, 3, 6):
-            p, a = addition(rng, d)
+        for da, db in ((1, 1), (3, 2), (6, 4)):
+            p, a = addition(rng, da, db)
             self.assertTrue(check_addition(p, a))
-            self.assertFalse(check_addition(p, str(int(a) + 1)))
-            self.assertTrue(all(len(x) == d for x in p[8:-1].split(" + ")) or d == 1)  # no leading zeros
+            self.assertEqual([len(x) for x in p[8:-1].split(" + ")], [da, db])  # exact lengths, no leading zeros
 
     def test_parse_instruct_fields_before_and_after_story(self):
         prompt, story = parse_instruct(DOC)

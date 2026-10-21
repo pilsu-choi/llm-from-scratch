@@ -64,8 +64,9 @@ def evaluate(model, val_batches):
     return sum(losses) / len(losses)
 
 
-def main():
-    tc, mc = parse()
+def main(tc=None, mc=None):
+    if tc is None:
+        tc, mc = parse()
     dev = "cuda"
     run = os.path.join("runs", tc.name)
     os.makedirs(run, exist_ok=True)

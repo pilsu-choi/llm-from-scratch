@@ -13,3 +13,4 @@ timestamp: 2026-10-21T00:00:00Z
 - [concepts/](concepts/index.md) — 각 단계의 원리 설명
 - [runbooks/](runbooks/index.md) — 실행 환경·절차
 - [decisions/](decisions/index.md) — 설계 결정 기록
+- [lessons/](lessons/index.md) — 실패와 배운 점
