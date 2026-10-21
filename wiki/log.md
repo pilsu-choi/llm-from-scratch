@@ -50,3 +50,4 @@ title: 작업 로그
   데이터 g0ster/TinyStories-Korean (MIT, 기계 번역) → [결정](decisions/2026-10-21-korean-data.md). tok_ko = tok_chat + 병합 8192 (vocab 16386): 한국어 1.01 → 6.53 bytes/token, 영어 인코딩 동일.
   `ko_ext` vs `ko_byte`(바이트 대조군), runs/small에서 5000스텝, 한국어:영어 1:1, lr 5e-4: 한국어 0.497 대 0.714 bits/byte (학습 전 2.24 / 14.1), 영어 val 1.1638 → 1.2061 / 1.1895.
   한국어 샘플 100개씩(400바이트): 깨진 글자 0/0, distinct-2 ext 0.662 / byte 0.819 / 실제 0.793, 같은 어절 3연속 1/0.
+- `vrsi_rows` 12라운드 완료: 라운드 6–12 1–16개 1.00, 전체 0.769, 덧셈 0 / 이야기 0.0. `vrsi_rows_replay`(복습 + RSI, `vlm_rows_replay`에서 출발) 12라운드: frontier 8 → 16, 라운드 8–12 1–16개 1.00, 전체 0.771, 덧셈 1.0/0.995/0.99/0.83, 이야기 0.507. 라운드 4 frontier 11 pass@1 0.019에서도 진행.
