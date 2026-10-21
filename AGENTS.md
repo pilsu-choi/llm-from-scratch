@@ -37,7 +37,7 @@ Goals, scope and the done-when criteria for each stage are in [PRD.md](PRD.md). 
 ## 4. Repository layout
 
 ```
-scratchlm/         the package: tokenizer.py, autograd.py (numpy), model.py, data.py, optim.py, train.py (torch), ...
+scratchlm/         the package: tokenizer.py, autograd.py (numpy), model.py, data.py, optim.py, train.py (torch), tasks.py (chat template + verifiers), sft.py, ...
 tests/             stdlib unittest; torch tests skip when torch is not installed
 scripts/pgx.sh     rsync the repo to PGX, run a command in the NGC PyTorch container
 scripts/get_data.sh

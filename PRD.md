@@ -37,7 +37,7 @@ LLM과 VLM이 **어떻게 동작하고 학습되는지**를 직접 만들면서 
 | 1.5 | numpy autograd | 모든 연산 gradcheck 통과, byte-level MLP LM이 val loss를 ln 256에서 의미 있게 낮춤 (5.46 → 1.51) | ✅ |
 | 2 | GPT 모델 | 수동 attention = SDPA, KV cache = full forward, causal, RoPE 상대위치, 파라미터 공식 테스트 통과, 처리량 측정 (56.3k tok/s) | ✅ |
 | 3 | 사전학습 | 직접 만든 AdamW + warmup/cosine + bf16 + grad accum으로 small(29.9M) 학습. val loss 곡선과 샘플을 기록하고, 문법적으로 맞는 TinyStories 문장을 생성. checkpoint 저장/재개 | ⏳ |
-| 4 | SFT | chat 템플릿 + prompt loss masking. 지시(질문→답) 형식을 따르는 비율을 측정. 산술 과제의 iteration 0 정확도 > 0 | ⏳ |
+| 4 | SFT | chat 템플릿 + prompt loss masking. 지시(질문→답) 형식을 따르는 비율을 측정. 산술 과제의 iteration 0 정확도 > 0 | ✅ 부분 (1–3자리 99–100%, 단어 18→60%; 4자리+ 0% → 5단계 전 결정) |
 | 5 | RSI | 생성 → verifier 필터 → 재학습을 N회 반복. held-out 정확도가 iteration마다 오르는지, 다양성(distinct-n, pass@k)이 붕괴하는지 기록. 커리큘럼(자릿수 증가) 효과 측정 | ⏳ |
 | 6 | VLM | 직접 만든 ViT + projector를 LM에 연결. 합성 이미지(도형·개수·색) QA 정확도 측정. 같은 RSI 루프를 이미지 과제에 적용 | ⏳ |
 | 7 | 한국어 | 토크나이저 확장(vocab surgery) 또는 재학습으로 한국어 bytes/token 개선 (현재 1.0) + continued pretraining 후 한국어 샘플 품질 비교 | ⏳ |

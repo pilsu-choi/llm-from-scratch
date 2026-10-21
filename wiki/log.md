@@ -28,3 +28,7 @@ title: 작업 로그
   샤드: train 536,358,234 / val 5,416,419 토큰 (4.08 bytes/token, 인코딩 ~20초). `pgx.sh`에 `DETACH=<name>` 분리 실행 추가.
   smoke: torch.compile로 **141.8k tok/s (MFU 0.426)**, 재개 확인.
   본 학습 `runs/small`: 16,000 step(524M 토큰) **63분**, 최종 **val 1.1638** (0.41 bits/byte, ppl 3.2), train 1.1489. 곡선 `concepts/images/2026-10-21-small-loss.svg`.
+- 4단계 SFT: `tasks.py`(채팅 템플릿, 덧셈·이야기 과제와 채점기), `sft.py`(데이터 준비·평가), `model.load_checkpoint`(어휘 확장), `batches` 마스크, `train --init`. 테스트 28개 통과.
+  데이터: TinyStories-Instruct 189,641 이야기 + 1–3자리 덧셈 600,000 = 56.9M 토큰. SFT 2,600 step 10.5분, val 1.2539.
+  결과(SFT 전 → 후): 덧셈 1/2/3자리 0 → 1.00/1.00/0.99, 4–6자리 0 → 0, 필수 단어 포함 0.183 → 0.600.
+  발견: 4자리 덧셈은 앞자리는 맞지만 4자리에서 멈춤(학습한 최대 답 길이) → pass@16도 0 → 길이 일반화 실패, RSI 출발 조건 미달.

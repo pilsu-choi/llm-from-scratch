@@ -168,6 +168,23 @@ class GPT(nn.Module):
         return ids
 
 
+def load_checkpoint(path, device="cuda", vocab_size=None):
+    """Rebuild a GPT from a train.py checkpoint. A larger vocab_size appends embedding rows for new tokens
+    (vocab surgery): mean of the existing rows plus small noise, so they start as an "average" token."""
+    ck = torch.load(path, map_location=device)
+    c, state = Config(**ck["model_config"]), ck["model"]
+    if vocab_size and vocab_size > c.vocab_size:
+        for k in ("embed.weight", "head.weight"):
+            if k in state:
+                w = state[k]
+                new = w.mean(0, keepdim=True) + 0.02 * torch.randn(vocab_size - c.vocab_size, w.shape[1], device=w.device)
+                state[k] = torch.cat([w, new])
+        c.vocab_size = vocab_size
+    model = GPT(c).to(device)
+    model.load_state_dict(state)
+    return model
+
+
 if __name__ == "__main__":
     # Parameter breakdown + training-step throughput: hand-written attention vs SDPA, fp32 vs bf16.
     import time

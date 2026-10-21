@@ -4,6 +4,7 @@ A shard is one flat array of ids: doc_1 <eot> doc_2 <eot> ... Training samples r
 windows from it (input = window[:-1], target = window[1:]). Windows may cross <eot>; the model learns
 that a new story starts after it. uint16 fits vocab_size <= 65536 and halves disk/RAM vs int32.
 """
+import os
 from multiprocessing import Pool
 
 import numpy as np
@@ -45,15 +46,22 @@ def prepare(txt_path, tok_path, out_path, workers=16):
 
 
 def batches(path, batch, ctx_len, device, seed=0):
-    """Endless (x, y) int64 batches of random windows from a uint16 shard."""
+    """Endless (x, y) int64 batches of random windows from a uint16 shard.
+    If `<shard minus .bin>.mask` exists (SFT), targets whose mask is 0 (prompt tokens) become -1 = ignored."""
     data = np.memmap(path, dtype=np.uint16, mode="r")
+    mask_path = path[: -len(".bin")] + ".mask"
+    mask = np.memmap(mask_path, dtype=np.uint8, mode="r") if os.path.exists(mask_path) else None
     rng = np.random.default_rng(seed)
     while True:
         starts = rng.integers(0, len(data) - ctx_len - 1, batch)
-        w = torch.from_numpy(np.stack([data[s : s + ctx_len + 1] for s in starts]).astype(np.int64))
+        w = np.stack([data[s : s + ctx_len + 1] for s in starts]).astype(np.int64)
+        x, y = w[:, :-1], w[:, 1:].copy()
+        if mask is not None:
+            y[np.stack([mask[s + 1 : s + ctx_len + 1] for s in starts]) == 0] = -1
+        xy = torch.from_numpy(np.stack([x, y]))
         if device == "cuda":
-            w = w.pin_memory().to(device, non_blocking=True)  # async host->GPU copy
-        yield w[:, :-1], w[:, 1:]
+            xy = xy.pin_memory().to(device, non_blocking=True)  # async host->GPU copy
+        yield xy[0], xy[1]
 
 
 if __name__ == "__main__":

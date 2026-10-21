@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import torch
 
 from .data import batches
-from .model import GPT, Config
+from .model import GPT, Config, load_checkpoint
 from .optim import AdamW, clip_grad_norm, cosine_lr
 from .tokenizer import Tokenizer
 
@@ -27,6 +27,7 @@ class TrainConfig:
     train: str = "data/ts_train.bin"
     val: str = "data/ts_val.bin"
     tok: str = "data/tok8k.json"
+    init: str = ""  # start from these weights (e.g. pretrained ckpt for SFT); vocab grows to the tokenizer's
     batch: int = 64  # sequences per micro-batch
     accum: int = 1  # micro-batches per optimizer step
     steps: int = 15000
@@ -69,9 +70,13 @@ def main():
     run = os.path.join("runs", tc.name)
     os.makedirs(run, exist_ok=True)
     tok = Tokenizer.load(tc.tok)
-    mc.vocab_size = tok.vocab_size
     torch.manual_seed(tc.seed)
-    model = GPT(mc).to(dev)
+    if tc.init:
+        model = load_checkpoint(tc.init, dev, tok.vocab_size)
+        mc = model.c
+    else:
+        mc.vocab_size = tok.vocab_size
+        model = GPT(mc).to(dev)
     opt = AdamW(model.parameters(), weight_decay=tc.wd)
     n_params = sum(p.numel() for p in model.parameters())
 

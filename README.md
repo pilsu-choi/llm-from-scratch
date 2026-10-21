@@ -10,7 +10,7 @@ then make it improve itself with a **recursive self-improvement (RSI)** loop on 
 | 1.5 | Tensor autograd on numpy + byte-level MLP LM (`scratchlm/autograd.py`) | ✅ |
 | 2 | Decoder-only GPT, hand-written layers (RMSNorm, RoPE, SwiGLU, KV cache) — `scratchlm/model.py` | ✅ |
 | 3 | Pretraining on TinyStories: hand-written AdamW, cosine LR, bf16, torch.compile — `scratchlm/train.py` | ✅ |
-| 4 | SFT | ⏳ |
+| 4 | SFT: chat template, role tokens (vocab surgery), prompt masking, addition + story instructions — `scratchlm/sft.py`, `tasks.py` | ✅ |
 | 5 | RSI: generate → verify → retrain (STaR / ReST-EM) | ⏳ |
 | 6 | VLM: ViT + projector (LLaVA-style) | ⏳ |
 | 7 | Korean extension | ⏳ |
@@ -31,6 +31,9 @@ scripts/pgx.sh python -m scratchlm.model                           # param count
 scripts/pgx.sh python -m scratchlm.tokenizer data/TinyStoriesV2-GPT4-train.txt data/tok8k.json --vocab 8192
 scripts/pgx.sh python -m scratchlm.data data/TinyStoriesV2-GPT4-train.txt data/tok8k.json data/ts_train.bin   # (and valid -> ts_val.bin)
 DETACH=pretrain-small scripts/pgx.sh python -m scratchlm.train --name small --steps 16000   # ~1 h; rerun to resume
+scripts/pgx.sh python -m scratchlm.sft prepare      # SFT shards (needs TinyStories-Instruct in data/)
+scripts/pgx.sh python -m scratchlm.train --name sft --init runs/small/ckpt.pt --tok data/tok_chat.json --train data/sft_train.bin --val data/sft_val.bin --steps 2600 --lr 3e-4 --warmup 100
+scripts/pgx.sh python -m scratchlm.sft eval runs/sft/ckpt.pt
 ```
 
 `scripts/pgx.sh` rsyncs the repo to PGX and runs the command in `nvcr.io/nvidia/pytorch:26.09-py3`.
