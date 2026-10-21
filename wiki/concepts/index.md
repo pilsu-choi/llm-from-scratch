@@ -10,3 +10,4 @@ title: concepts
 - [SFT (지시 따르기 학습)](2026-10-21-sft.md)
 - [RSI (재귀적 자기개선)](2026-10-21-rsi.md)
 - [VLM (ViT + projector)](2026-10-21-vlm.md)
+- [한국어 확장 (토크나이저 확장·이어서 사전학습)](2026-10-21-korean.md)

@@ -137,6 +137,10 @@ _newest (6): _ n e w e s t
 - **train**: CLI에서 `re.split`으로 문서를 special 기준으로 나눠 학습한다. 안 그러면 `<|endoftext|>` 문자열이 일반 문자 chunk로 학습되어 `<`, `|`, `end` 같은 merge가 낭비되거나 문서 경계를 넘어 이어지는 merge가 생긴다.
 - special id는 merge 뒤에 붙는다 (`n = 256 + len(merges)`부터). 테스트가 `eot == tok.vocab_size - 1`을 확인한다. 그래서 학습 루프는 `vocab_size - len(specials)`까지만 돈다.
 
+## 6.5 확장 (7단계)
+
+`Tokenizer.extend(texts, n_new)`는 지금 병합 위에 새 병합을 덧붙인다. 새 id는 현재 vocab 다음 번호를 받고, 기존 병합의 순서와 id는 그대로라서 학습한 모델이 새 임베딩 행만 더 받으면 된다. `train`은 바이트 256개짜리 빈 토크나이저를 `extend`하는 것이다. 한국어 병합 8192개 확장으로 한국어 bytes/token이 1.01 → 6.53이 됐다 ([한국어 확장](2026-10-21-korean.md)).
+
 ## 7. 실습
 
 1. **압축률 비교**: TinyStories valid에서 vocab 1024 / 8192 / 32768로 각각 학습(`--vocab`, 파일은 `--max-mb`로 제한)한 뒤, `bytes / tokens` 비율을 표로 정리하라. 증가폭이 어디서 둔화되는가? embedding 파라미터(`V x d`)와 함께 비교해 보자.
