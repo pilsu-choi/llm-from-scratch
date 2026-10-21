@@ -1,11 +1,12 @@
 import importlib.util
 import os
+import re
 import tempfile
 import unittest
 
 import numpy as np
 
-from scratchlm.tasks import ASSISTANT, USER, addition, chat_tokenizer, check_addition, encode_chat, parse_instruct, words_used
+from scratchlm.tasks import ASSISTANT, USER, addition, chat_tokenizer, check_addition, continue_story, encode_chat, parse_instruct, words_used
 from scratchlm.tokenizer import Tokenizer
 
 HAS_TORCH = importlib.util.find_spec("torch") is not None
@@ -33,6 +34,19 @@ class TestTasks(unittest.TestCase):
             p, a = addition(rng, da, db, shift=True)
             self.assertTrue(check_addition(p, a))
             self.assertEqual([len(str(int(x)).rstrip("0") or "0") <= d for x, d in zip(p[8:-1].split(" + "), (da, db))], [True, True])
+
+    def test_korean_addition_same_problem_other_words(self):
+        en = addition(np.random.default_rng(1), 5, 3, shift=True)
+        ko = addition(np.random.default_rng(1), 5, 3, shift=True, lang="ko")
+        self.assertEqual(en[1], ko[1])
+        self.assertEqual(re.findall(r"\d+", en[0]), re.findall(r"\d+", ko[0]))
+        self.assertTrue(ko[0].endswith("의 값은?") and check_addition(*ko))
+
+    def test_continue_story(self):
+        prompt, rest = continue_story("옛날 옛날, 톰이 있었어요. 톰은 공을 좋아했어요.\n끝!")
+        self.assertTrue(prompt.endswith("시작: 옛날 옛날, 톰이 있었어요."))
+        self.assertEqual(rest, "톰은 공을 좋아했어요.\n끝!")
+        self.assertIsNone(continue_story("한 문장뿐이에요."))
 
     def test_parse_instruct_fields_before_and_after_story(self):
         prompt, story = parse_instruct(DOC)
