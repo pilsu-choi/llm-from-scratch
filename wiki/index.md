@@ -8,6 +8,7 @@ timestamp: 2026-10-21T00:00:00Z
 # llm-from-scratch wiki
 
 - [로드맵](2026-10-21-roadmap.md) — 단계별 계획과 RSI 설계 원칙
+- [PRD](../PRD.md), [AGENTS.md](../AGENTS.md) — 목표·완료 기준, 에이전트 작업 규칙
 - [작업 로그](log.md)
 - [concepts/](concepts/index.md) — 각 단계의 원리 설명
 - [runbooks/](runbooks/index.md) — 실행 환경·절차

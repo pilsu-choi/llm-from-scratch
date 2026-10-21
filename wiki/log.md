@@ -17,3 +17,10 @@ title: 작업 로그
 - 의존성 정책 수정(소유자): `numpy` 허용 → 외부 의존성 `numpy` + `torch`. 1.5단계를 스칼라 autograd 대신 **numpy tensor autograd**로.
 - 1.5단계: `scratchlm/autograd.py` (add/mul/pow/matmul/exp/log/tanh/relu/sum/mean/reshape/getitem, fused cross_entropy) + finite-difference gradcheck 테스트 5개.
   데모 byte-level MLP LM(121k params, ctx 8): val loss 5.46 → **1.51** (6000 steps, PGX CPU ~10초).
+- GitHub 공개 레포 생성 `pilsu-choi/llm-from-scratch` (소유자 승인, 기본 브랜치 dev).
+- 비교용 참고 구현 지정(소유자): Karpathy microgpt → nanoGPT → nanochat. 개념 페이지에 비교 표 자리만 마련.
+- 2단계: `scratchlm/model.py` — Linear/Embedding/RMSNorm/RoPE/SwiGLU/Attention(수동·SDPA)/KV cache/generate 직접 구현. 테스트 9개(causal, KV cache 동치, 수동=SDPA, RoPE 상대위치, 파라미터 공식, 과적합 등) PGX GPU에서 통과.
+  small(29.9M) fwd+bwd B16×T512: manual fp32 21.9k / manual bf16 32.3k / SDPA fp32 33.0k / **SDPA bf16 56.3k tok/s (3.6 GiB)** ≈ GB10 bf16 peak의 ~17%.
+- 발견: NGC 이미지가 `TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1`로 fp32 matmul을 TF32로 강제 → 첫 fp32 측정(26.7k/41.9k)은 TF32였음. `pgx.sh`에서 0으로 끔.
+- 리뷰 반영: KV cache 테스트에 "비어 있지 않은 cache + 다중 토큰 chunk"(명시적 mask 경로) 추가, 전부 ignore된 batch의 cross_entropy NaN → 0.
+- `AGENTS.md`(에이전트 작업 규칙), `PRD.md`(목표·범위·단계별 완료 기준) 추가.
