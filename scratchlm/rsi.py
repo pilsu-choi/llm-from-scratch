@@ -8,19 +8,20 @@ Each round:
   5. measure greedy accuracy by digits; if the frontier is solved well enough, D += 1
 No answer in the training data comes from anywhere but the model; ground truth only grades.
 
-    scripts/pgx.sh python -m scratchlm.rsi --init runs/sft_rev/ckpt.pt
+    DETACH=rsi scripts/pgx.sh python -m scratchlm.rsi --init runs/sft_pad/ckpt.pt --rounds 10
 """
 import argparse
 import dataclasses
 import json
 import os
+import time
 from dataclasses import dataclass
 
 import numpy as np
 
 from .model import Config, load_checkpoint
 from .sft import write_shard
-from .tasks import addition, addition_accuracy, check_addition, reply
+from .tasks import WIDTH, addition, addition_accuracy, check_addition, reply
 from .tokenizer import Tokenizer
 from .train import TrainConfig
 from .train import main as train
@@ -29,12 +30,12 @@ from .train import main as train
 @dataclass
 class RSIConfig:
     name: str = "rsi"
-    init: str = "runs/sft_rev/ckpt.pt"
+    init: str = "runs/sft_pad/ckpt.pt"
     tok: str = "data/tok_chat.json"
-    start_digits: int = 8  # first frontier (SFT covered operands of 1-7 digits)
-    max_digits: int = 16
+    start_digits: int = 8  # lowest possible frontier (SFT trained operands of 1-7 digits)
+    max_digits: int = WIDTH
     rounds: int = 10
-    problems: int = 100000  # per round
+    problems: int = 40000  # per round
     k: int = 8  # samples per problem
     min_kept: int = 200  # stop when fewer frontier problems get a verified answer
     temperature: float = 0.7
@@ -45,8 +46,8 @@ class RSIConfig:
 
 
 def pose(rng, n, frontier):
-    """Half the problems at the frontier (longer operand has `frontier` digits), half below it, grouped by
-    operand lengths so each group tokenizes to one length (one batch)."""
+    """Half the problems at the frontier (longer operand has `frontier` digits), half below it (replay),
+    grouped by operand lengths for per-group stats."""
     groups = {}
     for i in range(n):
         top = frontier if i % 2 == 0 or frontier == 1 else int(rng.integers(1, frontier))
@@ -59,11 +60,11 @@ def pose(rng, n, frontier):
 
 def sample_and_filter(model, tok, groups, frontier, k, temperature):
     """Self-generated training data: for each problem, the first of k sampled answers the verifier accepts.
-    Stats are split into frontier vs replay problems; averaged together, ~99% replay would hide a 0% frontier."""
+    Stats are split into frontier vs replay problems: averaged 50/50, a ~99% replay half would make a 0% frontier look like ~50%."""
     kept, stats = [], {s: {"n": 0, "pass1": 0, "passk": 0, "kept": 0} for s in ("frontier", "replay")}
     for (da, db), probs in groups.items():
         st = stats["frontier" if max(da, db) == frontier else "replay"]
-        outs = reply(model, tok, [p for p in probs for _ in range(k)], max(da, db) + 3, temperature)
+        outs = reply(model, tok, [p for p in probs for _ in range(k)], WIDTH + 2, temperature)
         for i, p in enumerate(probs):
             ok = [o for o in outs[i * k : (i + 1) * k] if check_addition(p, o)]
             st["n"] += 1
@@ -83,13 +84,16 @@ def main(rc):
     log = open(os.path.join(run, "rsi.jsonl"), "a")
     tok = Tokenizer.load(rc.tok)
     rng = np.random.default_rng(rc.seed)
-    prev, frontier = rc.init, rc.start_digits
+    prev = rc.init
     model = load_checkpoint(prev).eval()
     acc = addition_accuracy(model, tok, range(1, rc.max_digits + 1))
+    # start where the model is not yet reliable (SFT already generalizes a few digits past what it trained on)
+    frontier = next((d for d in range(rc.start_digits, rc.max_digits + 1) if acc[d] < rc.promote), rc.max_digits)
     row = {"round": 0, "frontier": frontier, "accuracy": acc}
     log.write(json.dumps(row) + "\n")
     print(row, flush=True)
     for r in range(1, rc.rounds + 1):
+        t0 = time.time()
         kept, stats = sample_and_filter(model, tok, pose(rng, rc.problems, frontier), frontier, rc.k, rc.temperature)
         if stats["frontier"]["kept"] < rc.min_kept:  # nothing new to learn from: training would be pure replay
             print({"round": r, "stop": "too few verified frontier answers", "stats": stats}, flush=True)
@@ -105,7 +109,7 @@ def main(rc):
         prev = os.path.join(run, f"r{r}", "ckpt.pt")
         model = load_checkpoint(prev).eval()
         acc = addition_accuracy(model, tok, range(1, rc.max_digits + 1))
-        row = {"round": r, "frontier": frontier, "sampling": stats, "tokens": n_tokens, "accuracy": acc}
+        row = {"round": r, "frontier": frontier, "sampling": stats, "tokens": n_tokens, "accuracy": acc, "secs": round(time.time() - t0)}
         log.write(json.dumps(row) + "\n")
         log.flush()
         print(row, flush=True)

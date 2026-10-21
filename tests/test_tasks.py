@@ -20,13 +20,19 @@ Summary: Tom plays with his ball.
 
 class TestTasks(unittest.TestCase):
     def test_addition_and_verifier(self):
-        self.assertTrue(check_addition("What is 25 + 17?", "24"))  # 42 written ones-digit first
-        self.assertFalse(check_addition("What is 25 + 17?", "42"))
+        q = "What is 0000000000000025 + 0000000000000017?"
+        self.assertTrue(check_addition(q, "24000000000000000"))  # 42 padded to 17 digits, ones digit first
+        self.assertFalse(check_addition(q, "24"))
+        self.assertFalse(check_addition(q, "00000000000000042"))
         rng = np.random.default_rng(0)
         for da, db in ((1, 1), (3, 2), (6, 4)):
             p, a = addition(rng, da, db)
             self.assertTrue(check_addition(p, a))
-            self.assertEqual([len(x) for x in p[8:-1].split(" + ")], [da, db])  # exact lengths, no leading zeros
+            self.assertEqual([len(str(int(x))) for x in p[8:-1].split(" + ")], [da, db])  # significant digits
+            self.assertEqual([len(x) for x in p[8:-1].split(" + ")], [16, 16])  # fixed width
+            p, a = addition(rng, da, db, shift=True)
+            self.assertTrue(check_addition(p, a))
+            self.assertEqual([len(str(int(x)).rstrip("0") or "0") <= d for x, d in zip(p[8:-1].split(" + "), (da, db))], [True, True])
 
     def test_parse_instruct_fields_before_and_after_story(self):
         prompt, story = parse_instruct(DOC)

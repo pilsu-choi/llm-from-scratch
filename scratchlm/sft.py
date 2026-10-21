@@ -22,7 +22,8 @@ def examples(instruct_path, n_add, seed):
         ex = [e for e in map(parse_instruct, f.read().split(EOT)) if e]
     n_story = len(ex)
     rng = np.random.default_rng(seed)
-    ex += [addition(rng, *rng.choice(SFT_DIGITS, 2)) for _ in range(n_add)]  # operand lengths drawn independently
+    # operand lengths drawn independently; half the problems shifted so every digit position is exercised
+    ex += [addition(rng, *rng.choice(SFT_DIGITS, 2), shift=i % 2 == 1) for i in range(n_add)]
     random.Random(seed).shuffle(ex)
     return ex, n_story
 

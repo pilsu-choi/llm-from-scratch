@@ -28,21 +28,38 @@ def encode_chat(tok, prompt, answer):
 # ---- addition: verifiable by construction --------------------------------------------------------
 
 
+WIDTH = 16  # every operand is zero-padded to 16 digits; the answer is always WIDTH + 1 digits
+
+
 def _number(rng, d):
-    return int(rng.integers(10 ** (d - 1) if d > 1 else 0, 10**d))  # exactly d digits, no leading zero
+    return int(rng.integers(10 ** (d - 1) if d > 1 else 0, 10**d))  # d significant digits
 
 
-def addition(rng, da, db=None):
-    """A random da-digit + db-digit problem. The answer is written **reversed** (ones digit first): each output
-    digit then depends only on digits already seen plus one carry, which is what lets length generalize."""
-    a, b = _number(rng, da), _number(rng, da if db is None else db)
-    return f"What is {a} + {b}?", str(a + b)[::-1]
+def _answer(a, b):
+    return f"{a + b:0{WIDTH + 1}d}"[::-1]
+
+
+def addition(rng, da, db=None, shift=False):
+    """A random da-digit + db-digit problem in a fixed-width format:
+    - operands zero-padded to WIDTH digits, so the k-th digit of every number sits at the same position
+      whatever its value (a model that finds digits by position never meets an unseen distance)
+    - answer padded to WIDTH + 1 digits and written reversed (ones digit first), so each output digit needs
+      only digits already seen plus one carry, in the order carries propagate.
+    - shift=True moves each operand to a random position (1354 -> 1354000000), so every position sees
+      real digits in training; without it, positions past the longest trained length are always 0 and
+      the model learns to ignore them.
+    See wiki/lessons/2026-10-21-length-generalization.md for why plain and reversed formats failed."""
+    db = da if db is None else db
+    a, b = _number(rng, da), _number(rng, db)
+    if shift:
+        a, b = a * 10 ** int(rng.integers(0, WIDTH - da + 1)), b * 10 ** int(rng.integers(0, WIDTH - db + 1))
+    return f"What is {a:0{WIDTH}d} + {b:0{WIDTH}d}?", _answer(a, b)
 
 
 def check_addition(prompt, reply):
-    """Verifier: the reply must be exactly the reversed integer sum."""
+    """Verifier: the reply must be exactly the padded, reversed sum."""
     a, b = map(int, re.findall(r"\d+", prompt))
-    return reply.strip() == str(a + b)[::-1]
+    return reply.strip() == _answer(a, b)
 
 
 # ---- story instructions (TinyStories-Instruct) ---------------------------------------------------
@@ -90,18 +107,19 @@ def reply(model, tok, prompts, max_new, temperature=0.0, chunk=2048):
     dev, eot, res = next(model.parameters()).device, tok.specials[EOT], []
     for c in range(0, len(ids), chunk):
         x = torch.tensor(ids[c : c + chunk], device=dev)
-        out = model.generate(x, max_new, temperature=temperature, top_k=50 if temperature else None)
+        with torch.autocast(dev.type, dtype=torch.bfloat16, enabled=dev.type == "cuda"):  # ~2x faster sampling
+            out = model.generate(x, max_new, temperature=temperature, top_k=50 if temperature else None)
         for row in out[:, x.shape[1] :].tolist():
             res.append(tok.decode(row[: row.index(eot)] if eot in row else row))
     return res
 
 
-def addition_accuracy(model, tok, digits=range(1, 7), n=200, seed=0):
-    """Greedy pass@1 by digit count. All n-digit problems tokenize to the same length, so each digit count is one batch."""
+def addition_accuracy(model, tok, digits=range(1, WIDTH + 1), n=200, seed=0):
+    """Greedy pass@1 for d-digit + d-digit problems, per d. Fixed width: every prompt has the same token length."""
     rng = np.random.default_rng(seed)
     acc = {}
     for d in digits:
         probs = [addition(rng, d)[0] for _ in range(n)]
-        outs = reply(model, tok, probs, max_new=d + 3)
+        outs = reply(model, tok, probs, max_new=WIDTH + 2)
         acc[d] = sum(check_addition(p, o) for p, o in zip(probs, outs)) / n
     return acc

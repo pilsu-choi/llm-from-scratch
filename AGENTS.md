@@ -37,7 +37,7 @@ Goals, scope and the done-when criteria for each stage are in [PRD.md](PRD.md). 
 ## 4. Repository layout
 
 ```
-scratchlm/         the package: tokenizer.py, autograd.py (numpy), model.py, data.py, optim.py, train.py (torch), tasks.py (chat template + verifiers), sft.py, ...
+scratchlm/         the package: tokenizer.py, autograd.py (numpy), model.py, data.py, optim.py, train.py (torch), tasks.py (chat template + verifiers), sft.py, rsi.py, ...
 tests/             stdlib unittest; torch tests skip when torch is not installed
 scripts/pgx.sh     rsync the repo to PGX, run a command in the NGC PyTorch container
 scripts/get_data.sh
@@ -97,4 +97,6 @@ Stop and ask the owner about new dependencies, anything touching the hard rules,
 - English (TinyStories) first, then extend to Korean.
 - Minimal dependencies: first torch only, then numpy allowed too, for speed. Stage 1.5 is a numpy tensor autograd.
 - Digits are tokenized one per token, for the arithmetic RSI task.
+- Addition format (stage 5): operands zero-padded to 16 digits, answer reversed and padded to 17, half the SFT problems shifted to random positions;
+  SFT trains spans of 1–7 digits. Plain and reversed-only formats failed to length-generalize (wiki/lessons).
 - The repo is public on GitHub.
