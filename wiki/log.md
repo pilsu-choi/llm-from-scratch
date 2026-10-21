@@ -24,3 +24,7 @@ title: 작업 로그
 - 발견: NGC 이미지가 `TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1`로 fp32 matmul을 TF32로 강제 → 첫 fp32 측정(26.7k/41.9k)은 TF32였음. `pgx.sh`에서 0으로 끔.
 - 리뷰 반영: KV cache 테스트에 "비어 있지 않은 cache + 다중 토큰 chunk"(명시적 mask 경로) 추가, 전부 ignore된 batch의 cross_entropy NaN → 0.
 - `AGENTS.md`(에이전트 작업 규칙), `PRD.md`(목표·범위·단계별 완료 기준) 추가.
+- 3단계: `data.py`(병렬 인코딩 uint16 샤드 + memmap 무작위 윈도), `optim.py`(AdamW·cosine·clip, torch.optim.AdamW와 일치 테스트), `train.py`(bf16, grad accum, torch.compile, 고정 val, JSONL 로그, 원자적 ckpt, 재개). 테스트 23개 통과.
+  샤드: train 536,358,234 / val 5,416,419 토큰 (4.08 bytes/token, 인코딩 ~20초). `pgx.sh`에 `DETACH=<name>` 분리 실행 추가.
+  smoke: torch.compile로 **141.8k tok/s (MFU 0.426)**, 재개 확인.
+  본 학습 `runs/small`: 16,000 step(524M 토큰) **63분**, 최종 **val 1.1638** (0.41 bits/byte, ppl 3.2), train 1.1489. 곡선 `concepts/images/2026-10-21-small-loss.svg`.

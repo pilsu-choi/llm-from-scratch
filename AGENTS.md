@@ -37,7 +37,7 @@ Goals, scope and the done-when criteria for each stage are in [PRD.md](PRD.md). 
 ## 4. Repository layout
 
 ```
-scratchlm/         the package: tokenizer.py, autograd.py (numpy), model.py (torch), ...
+scratchlm/         the package: tokenizer.py, autograd.py (numpy), model.py, data.py, optim.py, train.py (torch), ...
 tests/             stdlib unittest; torch tests skip when torch is not installed
 scripts/pgx.sh     rsync the repo to PGX, run a command in the NGC PyTorch container
 scripts/get_data.sh
@@ -51,6 +51,7 @@ AGENTS.md PRD.md README.md
 uv run --no-project --with numpy python -m unittest -v   # local: tokenizer + autograd (torch tests skip)
 scripts/pgx.sh python -m unittest -v                      # all tests on the GB10
 scripts/pgx.sh python -m scratchlm.<module>               # each module's __main__ is its demo/benchmark
+DETACH=<name> scripts/pgx.sh python -m scratchlm.train --name <run>   # long run in a detached container; rerun resumes
 ```
 
 Before declaring a task done, all tests must pass on PGX.
