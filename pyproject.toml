@@ -3,10 +3,4 @@ name = "scratchlm"
 version = "0.0.1"
 description = "LLM/VLM from scratch, with a recursive self-improvement loop"
 requires-python = ">=3.10"
-dependencies = ["numpy"]
-
-[project.optional-dependencies]
-dev = ["pytest"]
-
-[tool.pytest.ini_options]
-pythonpath = ["."]
+dependencies = []  # tokenizer/data: stdlib only; model/training: torch (provided by the NGC container)

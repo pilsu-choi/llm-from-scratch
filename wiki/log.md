@@ -13,3 +13,4 @@ title: 작업 로그
 - 8k tokenizer 학습: train 앞 50MB, ~5초. valid 압축률 **4.10 bytes/token**.
   한국어 문장 50 bytes → **50 tokens** (merge 없음 = 바이트 그대로) — 7단계 한국어 확장의 동기.
 - 결정: 숫자 한 자리씩 토큰화(`\d`)로 변경 후 tok8k 재학습. 압축률 변화 없음(4.10), `3051` → `3|0|5|1`.
+- 의존성 정책 확정: 외부 의존성 `torch` 하나(저수준만). `numpy` 선언 제거, 테스트 pytest → stdlib unittest. 로드맵에 1.5단계(stdlib autograd) 추가.

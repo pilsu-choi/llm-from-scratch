@@ -1,12 +1,13 @@
 # llm-from-scratch
 
-A learning project: build an LLM, then a VLM, **from scratch** (no pretrained weights, no HF model classes),
+A learning project: build an LLM, then a VLM, **from scratch** — no pretrained weights, and the only dependency is `torch` (tensors + autograd; layers and optimizers are hand-written),
 then make it improve itself with a **recursive self-improvement (RSI)** loop on verifiable tasks.
 
 | Stage | What | Status |
 |---|---|---|
 | 0 | PGX (GB10) + NGC PyTorch container | ✅ |
 | 1 | Byte-level BPE tokenizer (`scratchlm/tokenizer.py`, stdlib only) | ✅ |
+| 1.5 | Scalar autograd in pure Python (micrograd-style) | ⏳ |
 | 2 | Decoder-only GPT (RMSNorm, RoPE, SwiGLU, KV cache) | ⏳ |
 | 3 | Pretraining on TinyStories | ⏳ |
 | 4 | SFT | ⏳ |
@@ -19,7 +20,7 @@ Details and principles (Korean): [wiki/](wiki/index.md), starting with the [road
 ## Quickstart
 
 ```bash
-uv run --no-project --with pytest pytest -q tests                  # local tests
+python3 -m unittest -v                  # local tests (stdlib unittest)
 ssh pgx 'cd llm-from-scratch && bash scripts/get_data.sh'          # TinyStories on PGX
 scripts/pgx.sh python -m scratchlm.tokenizer data/TinyStoriesV2-GPT4-train.txt data/tok8k.json --vocab 8192
 ```
