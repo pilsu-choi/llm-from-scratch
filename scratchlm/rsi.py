@@ -21,7 +21,7 @@ import numpy as np
 
 from .model import Config, load_checkpoint
 from .sft import write_shard
-from .tasks import WIDTH, addition, addition_accuracy, check_addition, reply
+from .tasks import TEMPLATES, WIDTH, addition, addition_accuracy, check_addition, reply
 from .tokenizer import Tokenizer
 from .train import TrainConfig
 from .train import main as train
@@ -32,6 +32,9 @@ class RSIConfig:
     name: str = "rsi"
     init: str = "runs/sft_pad/ckpt.pt"
     tok: str = "data/tok_chat.json"
+    lang: str = "en"  # prompt language of the posed problems ("ko": stage 8); the other language is only measured
+    mix: str = ""  # comma-separated SFT shards trained alongside each round's kept answers (replay against forgetting)
+    val: str = "data/sft_val.bin"
     start_digits: int = 8  # lowest possible frontier (SFT trained operands of 1-7 digits)
     max_digits: int = WIDTH
     rounds: int = 10
@@ -45,7 +48,7 @@ class RSIConfig:
     seed: int = 0
 
 
-def pose(rng, n, frontier):
+def pose(rng, n, frontier, lang="en"):
     """Half the problems at the frontier (longer operand has `frontier` digits), half below it (replay),
     grouped by operand lengths for per-group stats."""
     groups = {}
@@ -54,7 +57,7 @@ def pose(rng, n, frontier):
         da, db = top, int(rng.integers(1, top + 1))
         if rng.random() < 0.5:
             da, db = db, da
-        groups.setdefault((da, db), []).append(addition(rng, da, db)[0])
+        groups.setdefault((da, db), []).append(addition(rng, da, db, lang=lang)[0])
     return groups
 
 
@@ -86,15 +89,18 @@ def main(rc):
     rng = np.random.default_rng(rc.seed)
     prev = rc.init
     model = load_checkpoint(prev).eval()
-    acc = addition_accuracy(model, tok, range(1, rc.max_digits + 1))
+    digits = range(1, rc.max_digits + 1)
+    measure = lambda: {lang: addition_accuracy(model, tok, digits, lang=lang) for lang in TEMPLATES}  # both languages, always
+    accs = measure()
+    acc = accs[rc.lang]
     # start where the model is not yet reliable (SFT already generalizes a few digits past what it trained on)
     frontier = next((d for d in range(rc.start_digits, rc.max_digits + 1) if acc[d] < rc.promote), rc.max_digits)
-    row = {"round": 0, "frontier": frontier, "accuracy": acc}
+    row = {"round": 0, "frontier": frontier, "accuracy": acc, "accuracy_by_lang": accs}
     log.write(json.dumps(row) + "\n")
     print(row, flush=True)
     for r in range(1, rc.rounds + 1):
         t0 = time.time()
-        kept, stats = sample_and_filter(model, tok, pose(rng, rc.problems, frontier), frontier, rc.k, rc.temperature)
+        kept, stats = sample_and_filter(model, tok, pose(rng, rc.problems, frontier, rc.lang), frontier, rc.k, rc.temperature)
         if stats["frontier"]["kept"] < rc.min_kept:  # nothing new to learn from: training would be pure replay
             print({"round": r, "stop": "too few verified frontier answers", "stats": stats}, flush=True)
             break
@@ -102,14 +108,15 @@ def main(rc):
         n_tokens, _ = write_shard(tok, kept, shard)
         assert n_tokens > 4 * Config.ctx_len, "shard too small for training windows"
         train(  # fine-tune the current model on its own verified answers
-            TrainConfig(name=f"{rc.name}/r{r}", init=prev, tok=rc.tok, train=shard + ".bin", val="data/sft_val.bin",
+            TrainConfig(name=f"{rc.name}/r{r}", init=prev, tok=rc.tok, train=",".join([shard + ".bin", *filter(None, rc.mix.split(","))]), val=rc.val,
                         steps=rc.steps, lr=rc.lr, warmup=30, eval_every=rc.steps, ckpt_every=rc.steps, seed=rc.seed + r),
             Config(),
         )
         prev = os.path.join(run, f"r{r}", "ckpt.pt")
         model = load_checkpoint(prev).eval()
-        acc = addition_accuracy(model, tok, range(1, rc.max_digits + 1))
-        row = {"round": r, "frontier": frontier, "sampling": stats, "tokens": n_tokens, "accuracy": acc, "secs": round(time.time() - t0)}
+        accs = measure()
+        acc = accs[rc.lang]
+        row = {"round": r, "frontier": frontier, "sampling": stats, "tokens": n_tokens, "accuracy": acc, "accuracy_by_lang": accs, "secs": round(time.time() - t0)}
         log.write(json.dumps(row) + "\n")
         log.flush()
         print(row, flush=True)

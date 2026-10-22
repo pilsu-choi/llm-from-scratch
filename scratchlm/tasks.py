@@ -29,6 +29,9 @@ def encode_chat(tok, prompt, answer):
 
 
 WIDTH = 16  # every operand is zero-padded to 16 digits; the answer is always WIDTH + 1 digits
+# Same numbers and answer in both languages; only the words around them change. The Korean template attaches
+# no particle that depends on how the last digit is read (은/는), and neither template contains other digits.
+TEMPLATES = {"en": "What is {a} + {b}?", "ko": "{a} 더하기 {b}의 값은?"}
 
 
 def _number(rng, d):
@@ -39,7 +42,7 @@ def _answer(a, b):
     return f"{a + b:0{WIDTH + 1}d}"[::-1]
 
 
-def addition(rng, da, db=None, shift=False):
+def addition(rng, da, db=None, shift=False, lang="en"):
     """A random da-digit + db-digit problem in a fixed-width format:
     - operands zero-padded to WIDTH digits, so the k-th digit of every number sits at the same position
       whatever its value (a model that finds digits by position never meets an unseen distance)
@@ -53,7 +56,7 @@ def addition(rng, da, db=None, shift=False):
     a, b = _number(rng, da), _number(rng, db)
     if shift:
         a, b = a * 10 ** int(rng.integers(0, WIDTH - da + 1)), b * 10 ** int(rng.integers(0, WIDTH - db + 1))
-    return f"What is {a:0{WIDTH}d} + {b:0{WIDTH}d}?", _answer(a, b)
+    return TEMPLATES[lang].format(a=f"{a:0{WIDTH}d}", b=f"{b:0{WIDTH}d}"), _answer(a, b)
 
 
 def check_addition(prompt, reply):
@@ -172,6 +175,18 @@ def parse_instruct(doc):
     return prompt, story
 
 
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def continue_story(doc):
+    """A Korean story as an instruction (TinyStories-Korean has no Instruct version): the first sentence is the prompt,
+    the rest of the story is the answer. Returns None for one-sentence stories."""
+    parts = _SENTENCE_END.split(doc.strip(), maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        return None
+    return f"다음 문장으로 시작하는 짧은 이야기를 써 줘.\n시작: {parts[0]}", parts[1].strip()
+
+
 def words_used(prompt, reply):
     """Verifier for the story task: fraction of the required 'Words:' that appear in the reply."""
     m = re.search(r"^Words: (.*)$", prompt, re.M)
@@ -200,12 +215,12 @@ def reply(model, tok, prompts, max_new, temperature=0.0, chunk=2048):
     return res
 
 
-def addition_accuracy(model, tok, digits=range(1, WIDTH + 1), n=200, seed=0):
+def addition_accuracy(model, tok, digits=range(1, WIDTH + 1), n=200, seed=0, lang="en"):
     """Greedy pass@1 for d-digit + d-digit problems, per d. Fixed width: every prompt has the same token length."""
     rng = np.random.default_rng(seed)
     acc = {}
     for d in digits:
-        probs = [addition(rng, d)[0] for _ in range(n)]
+        probs = [addition(rng, d, lang=lang)[0] for _ in range(n)]
         outs = reply(model, tok, probs, max_new=WIDTH + 2)
         acc[d] = sum(check_addition(p, o) for p, o in zip(probs, outs)) / n
     return acc

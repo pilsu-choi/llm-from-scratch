@@ -14,6 +14,7 @@ then make it improve itself with a **recursive self-improvement (RSI)** loop on 
 | 5 | RSI: generate → verify → retrain on own answers — `scratchlm/rsi.py`. 16-digit addition 7% → 100% in 10 rounds (41 min) | ✅ |
 | 6 | VLM: ViT + projector (LLaVA-style) — `scratchlm/vision.py`. Stage A (LM frozen, 17 min): 57.7% on synthetic-scene QA, 1 object 97%, unseen 7–10 objects 39→19%. Image RSI on counting: self-training stalls at 9–10 objects (the model never says an unseen number), true-label control reaches 16. Answering row by row (`3+2=5+4=9+1=10`) breaks the wall: RSI reaches 1.00 on 1–16 objects in 6 rounds ; with SFT-text replay mixed into every step, the same RSI ends with one model that counts 1–16 at 1.00 and still adds 16-digit numbers (0.83) | ✅ |
 | 7 | Korean: extend the English BPE with 8192 Korean merges (old ids kept), add embedding rows, continue pretraining on a 1:1 Korean/English mix. Korean 1.01 → 6.5 bytes/token; 0.497 vs 0.714 bits/byte for the byte-tokenizer control at equal compute; English val 1.164 → 1.206 | ✅ |
+| 8 | Korean SFT + RSI: with Korean-worded addition trained on 1–3 digits only, Korean 4–7 digits score 0.83–0.98 (control without English addition: 0.06–0.36). Korean-only RSI reaches 16 digits 0.99 but erases English-prompt addition (0.01); with SFT replay both languages rise together (16 digits 0.67 Korean / 0.61 English after 20 rounds) | ✅ |
 
 Reference implementations for a later comparison: Karpathy's microgpt → nanoGPT → nanochat.
 
@@ -40,6 +41,8 @@ DETACH=vrsi_rows scripts/pgx.sh python -m scratchlm.vision rsi --name vrsi_rows 
 ssh pgx 'cd llm-from-scratch && bash scripts/get_data.sh ko'       # stage 7 Korean data
 scripts/pgx.sh python -m scratchlm.tokenizer data/TinyStories-Korean-train.txt data/tok_ko.json --extend data/tok_chat.json --vocab 8192 --max-mb 30
 DETACH=ko_ext scripts/pgx.sh python -m scratchlm.train --name ko_ext --tok data/tok_ko.json --init runs/small/ckpt.pt --train data/ko_train.bin,data/ts_train.bin --val data/ko_val.bin,data/ts_val.bin --steps 5000 --lr 5e-4 --warmup 200
+scripts/pgx.sh python -m scratchlm.sft prepare_ko     # stage 8 SFT pieces
+DETACH=s8_rsi scripts/pgx.sh python -m scratchlm.rsi --name s8_rsi --init runs/s8_enko/ckpt.pt --tok data/tok_ko.json --lang ko --start_digits 4 --rounds 12 --mix data/sft_train.bin,data/sft_ko_add_train.bin
 scripts/pgx.sh rm -rf runs/<name>   # runs/ is root-owned: delete from inside the container
 ```
 
