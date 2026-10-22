@@ -34,6 +34,7 @@ class RSIConfig:
     tok: str = "data/tok_chat.json"
     lang: str = "en"  # prompt language of the posed problems ("ko": stage 8); the other language is only measured
     mix: str = ""  # comma-separated SFT shards trained alongside each round's kept answers (replay against forgetting)
+    kept_weight: int = 1  # the kept shard is listed this many times, so it gets kept_weight / (kept_weight + #mix) of the windows
     val: str = "data/sft_val.bin"
     start_digits: int = 8  # lowest possible frontier (SFT trained operands of 1-7 digits)
     max_digits: int = WIDTH
@@ -108,7 +109,7 @@ def main(rc):
         n_tokens, _ = write_shard(tok, kept, shard)
         assert n_tokens > 4 * Config.ctx_len, "shard too small for training windows"
         train(  # fine-tune the current model on its own verified answers
-            TrainConfig(name=f"{rc.name}/r{r}", init=prev, tok=rc.tok, train=",".join([shard + ".bin", *filter(None, rc.mix.split(","))]), val=rc.val,
+            TrainConfig(name=f"{rc.name}/r{r}", init=prev, tok=rc.tok, train=",".join([shard + ".bin"] * rc.kept_weight + list(filter(None, rc.mix.split(",")))), val=rc.val,
                         steps=rc.steps, lr=rc.lr, warmup=30, eval_every=rc.steps, ckpt_every=rc.steps, seed=rc.seed + r),
             Config(),
         )
