@@ -11,3 +11,4 @@ title: concepts
 - [RSI (재귀적 자기개선)](2026-10-21-rsi.md)
 - [VLM (ViT + projector)](2026-10-21-vlm.md)
 - [한국어 확장 (토크나이저 확장·이어서 사전학습)](2026-10-21-korean.md)
+- [한국어 SFT + RSI (언어를 넘어 옮겨 가는 덧셈)](2026-10-22-korean-sft-rsi.md)
